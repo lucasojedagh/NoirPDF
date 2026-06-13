@@ -862,14 +862,18 @@ dom.viewerWrap.addEventListener('wheel', e => {
 }, { passive: false });
 
 // ── Mobile layout ──────────────────────────
+let _mobileActive = false;
+
 function updateMobileLayout() {
   const isMobile = window.innerWidth <= 768;
   const bar = document.getElementById('mobile-bottom-bar');
   const toolbar = document.getElementById('toolbar');
   if (!bar || !toolbar) return;
 
-  // All elements that move between toolbar and bottom bar sections
-  const movable = [
+  if (isMobile === _mobileActive) return;
+  _mobileActive = isMobile;
+
+  const getMovable = () => [
     { el: document.querySelector('.split-btn'), section: 0 },
     { el: document.getElementById('prev-btn'), section: 0 },
     { el: document.getElementById('page-input'), section: 0 },
@@ -890,71 +894,53 @@ function updateMobileLayout() {
   const sections = bar.querySelectorAll('.bar-section');
 
   if (isMobile) {
-    if (toolbar.style.display !== 'none') {
-      toolbar.style.display = 'none';
-      bar.style.display = 'flex';
-
-      for (const { el, section } of movable) {
-        if (el.parentNode === toolbar) sections[section].appendChild(el);
-      }
-
-      // Scroll to middle section (index 1)
-      requestAnimationFrame(() => {
-        const wrap = bar.querySelector('.bar-sections');
-        if (wrap) {
-          wrap.scrollLeft = wrap.offsetWidth;
-          updateBarDots();
-        }
-      });
+    // Move elements to bottom bar sections
+    for (const { el, section } of getMovable()) {
+      if (el.parentNode === toolbar) sections[section].appendChild(el);
     }
+
+    // Scroll to middle section (index 1)
+    requestAnimationFrame(() => {
+      const wrap = bar.querySelector('.bar-sections');
+      if (wrap) { wrap.scrollLeft = wrap.offsetWidth; updateBarDots(); }
+    });
   } else {
-    if (bar.style.display !== 'none') {
-      toolbar.style.display = '';
-      bar.style.display = 'none';
+    // Restore elements to toolbar by group
+    const fileInput = document.getElementById('file-input');
 
-      // Restore elements to their group positions using reference nodes
-      const fileInput = document.getElementById('file-input');
+    const restoreItems = [
+      { get: () => document.querySelector('.split-btn'), group: 0 },
+      { get: () => document.getElementById('prev-btn'), group: 0 },
+      { get: () => document.getElementById('page-input'), group: 0 },
+      { get: () => document.getElementById('page-info'), group: 0 },
+      { get: () => document.getElementById('next-btn'), group: 0 },
+      { get: () => document.getElementById('search-wrap'), group: 0 },
+      { get: () => document.getElementById('zoom-out'), group: 1 },
+      { get: () => document.getElementById('zoom-display'), group: 1 },
+      { get: () => document.getElementById('zoom-in'), group: 1 },
+      { get: () => document.getElementById('rotate-btn'), group: 1 },
+      { get: () => document.getElementById('pdf-theme-wrap'), group: 1 },
+      { get: () => document.querySelector('.color-picker'), group: 1 },
+      { get: () => document.querySelector('.lang-picker'), group: 2 },
+      { get: () => document.getElementById('page-theme-btn'), group: 2 },
+      { get: () => document.getElementById('help-btn'), group: 2 },
+    ];
 
-      const restoreItems = [
-        { get: () => document.querySelector('.split-btn'), group: 0 },
-        { get: () => document.getElementById('prev-btn'), group: 0 },
-        { get: () => document.getElementById('page-input'), group: 0 },
-        { get: () => document.getElementById('page-info'), group: 0 },
-        { get: () => document.getElementById('next-btn'), group: 0 },
-        { get: () => document.getElementById('search-wrap'), group: 0 },
-        { get: () => document.getElementById('zoom-out'), group: 1 },
-        { get: () => document.getElementById('zoom-display'), group: 1 },
-        { get: () => document.getElementById('zoom-in'), group: 1 },
-        { get: () => document.getElementById('rotate-btn'), group: 1 },
-        { get: () => document.getElementById('pdf-theme-wrap'), group: 1 },
-        { get: () => document.querySelector('.color-picker'), group: 1 },
-        { get: () => document.querySelector('.lang-picker'), group: 2 },
-        { get: () => document.getElementById('page-theme-btn'), group: 2 },
-        { get: () => document.getElementById('help-btn'), group: 2 },
-      ];
+    for (const item of restoreItems) {
+      const el = item.get();
+      if (!el || el.parentNode !== bar && !el.closest('.bar-section')) continue;
 
-      for (const item of restoreItems) {
-        const el = item.get();
-        if (!el || el.parentNode !== bar && !el.closest('.bar-section')) continue;
-
-        if (item.group === 0) {
-          // Open + page nav: after file-input
-          if (fileInput?.parentNode === toolbar) {
-            toolbar.insertBefore(el, fileInput.nextSibling);
-          } else {
-            toolbar.prepend(el);
-          }
-        } else if (item.group === 1) {
-          // Zoom group: before lang-picker
-          const ref = document.querySelector('.lang-picker');
-          if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
-          else toolbar.appendChild(el);
-        } else {
-          // Lang/theme/help: before fs-btn
-          const ref = document.getElementById('fs-btn');
-          if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
-          else toolbar.appendChild(el);
-        }
+      if (item.group === 0) {
+        if (fileInput?.parentNode === toolbar) toolbar.insertBefore(el, fileInput.nextSibling);
+        else toolbar.prepend(el);
+      } else if (item.group === 1) {
+        const ref = document.querySelector('.lang-picker');
+        if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
+        else toolbar.appendChild(el);
+      } else {
+        const ref = document.getElementById('fs-btn');
+        if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
+        else toolbar.appendChild(el);
       }
     }
   }
