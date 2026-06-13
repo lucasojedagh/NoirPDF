@@ -48,14 +48,13 @@ body.hand-mode:active { cursor: grabbing; }
 body.hand-mode #viewer-wrap { user-select: none; }
 
 #toolbar {
-  min-height: var(--toolbar-h);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 8px;
   row-gap: 12px;
-  padding: 0 14px;
+  padding: 8px 14px;
   transition: background var(--transition), border-color var(--transition), transform 0.3s ease, opacity 0.3s ease;
   z-index: 10;
   flex-wrap: wrap;
@@ -286,7 +285,7 @@ body.fs #toolbar:hover, body.fs #toolbar.fs-show {
 /* ── Progress bar ───────────────────────── */
 #progress-bar {
   height: 3px;
-  background: var(--border);
+  background: var(--surface);
   flex-shrink: 0;
   position: relative;
   z-index: 5;
@@ -617,7 +616,7 @@ body.fs #progress-bar { display: none; }
 
 #drop-zone {
   position: absolute;
-  inset: 0;
+  inset: 10%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -793,7 +792,7 @@ body.fs #viewer-wrap {
   #page-theme-btn { justify-content: center; }
   #help-btn { margin-left: auto; justify-content: center; }
 
-  #drop-zone { position: absolute; inset: 0; }
+  #drop-zone { position: absolute; inset: 10%; }
 
   #progress-bar { margin-top: 0; }
 }
