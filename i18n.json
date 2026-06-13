@@ -42,6 +42,7 @@
     "aboutDesc": "I built this tool because I wanted a quick and simple way to read my PDFs in dark mode.",
     "close": "Close",
     "menu": "Menu",
+    "closePdf": "Close PDF",
     "fsHint": "Press ESC to exit reading mode",
     "langLabel": "EN",
     "langName": "English"
@@ -89,6 +90,7 @@
     "aboutDesc": "Hice esta herramienta porque quer\u00EDa leer mis PDFs con tema oscuro de forma r\u00E1pida y sencilla.",
     "close": "Cerrar",
     "menu": "Men\u00FA",
+    "closePdf": "Cerrar PDF",
     "fsHint": "Presion\u00E1 ESC para salir del modo lectura",
     "langLabel": "ES",
     "langName": "Espa\u00F1ol"

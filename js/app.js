@@ -63,7 +63,7 @@ const dom = {
   pageInput:     document.getElementById('page-input'),
   pageInfo:      document.getElementById('page-info'),
   zoomDisplay:   document.getElementById('zoom-display'),
-  zoomSlider:    document.getElementById('zoom-slider'),
+
   pdfToggle:     document.getElementById('pdf-theme-toggle'),
   iconSun:       document.getElementById('theme-icon-sun'),
   iconMoon:      document.getElementById('theme-icon-moon'),
@@ -78,7 +78,6 @@ const dom = {
   zoomIn:        document.getElementById('zoom-in'),
   rotateBtn:     document.getElementById('rotate-btn'),
   handBtn:       document.getElementById('hand-btn'),
-  downloadBtn:   document.getElementById('download-btn'),
   fsBtn:         document.getElementById('fs-btn'),
   pageThemeBtn:  document.getElementById('page-theme-btn'),
   helpBtn:       document.getElementById('help-btn'),
@@ -90,7 +89,6 @@ const dom = {
   searchNext:    document.getElementById('search-next'),
   searchCount:   document.getElementById('search-count'),
   progressFill:  document.getElementById('progress-fill'),
-  exportPngBtn:  document.getElementById('export-png-btn'),
   langBtn:       document.getElementById('lang-btn'),
   langPopup:     document.getElementById('lang-popup')
 };
@@ -355,20 +353,34 @@ function goToPage(num) {
 
 function changePage(delta) { goToPage(currentPage + delta); }
 
+let zoomAnimTimer = null;
+
 function changeZoom(delta) {
   if (!pdfDoc) return;
+  const oldZoom = zoom;
   zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom + delta));
-  updateZoomDisplay(); autoSave(); rerenderAll();
+  updateZoomDisplay(); autoSave();
+  animateZoom(oldZoom);
 }
 
-function setZoomFromSlider() {
-  zoom = parseInt(dom.zoomSlider.value) / 100;
-  updateZoomDisplay(); autoSave(); rerenderAll();
+function animateZoom(oldZoom) {
+  if (zoom / oldZoom === 1) { rerenderAll(); return; }
+  if (zoomAnimTimer) { clearTimeout(zoomAnimTimer); zoomAnimTimer = null; }
+
+  const wraps = [...dom.viewerWrap.querySelectorAll('.page-wrap')];
+  wraps.forEach(w => w.classList.add('zoom-anim'));
+  if (wraps.length) void wraps[0].offsetWidth;
+
+  rerenderAll();
+
+  zoomAnimTimer = setTimeout(() => {
+    zoomAnimTimer = null;
+    wraps.forEach(w => w.classList.remove('zoom-anim'));
+  }, 250);
 }
 
 function updateZoomDisplay() {
   dom.zoomDisplay.textContent = Math.round(zoom * 100) + '%';
-  dom.zoomSlider.value = Math.round(zoom * 100);
 }
 
 function rerenderAll() {
@@ -565,6 +577,30 @@ function exportPng() {
   link.click();
 }
 
+// ── Close PDF ──────────────────────────────
+async function closePdf() {
+  if (!pdfDoc) return;
+  Object.values(renderTasks).forEach(t => { try { t.cancel(); } catch {} });
+  Object.values(thumbTasks).forEach(t => t.cancel?.());
+  renderTasks = {}; thumbTasks = {};
+  clearHighlights();
+  pdfDoc = null; currentPage = 1; zoom = 1.0; rotation = 0;
+  dom.viewerWrap.innerHTML = `<div id="drop-zone">
+    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+    <p data-i18n="dropzone">Click or drag a PDF here</p>
+    <small data-i18n="dropzoneSub">Supports local PDF files</small>
+  </div>`;
+  dom.sidebar.innerHTML = '';
+  dom.pageInput.value = 1; dom.pageInput.max = 1;
+  dom.pageInfo.textContent = '/ 0';
+  dom.progressFill.style.width = '0%';
+  updateZoomDisplay();
+  dom.dropZone = document.getElementById('drop-zone');
+  dom.dropZone.addEventListener('click', () => dom.fileInput.click());
+  Storage.clearPdf();
+  autoSave();
+}
+
 // ── Help modal ─────────────────────────────
 function toggleHelp() {
   dom.helpModal.classList.toggle('open');
@@ -688,9 +724,11 @@ updateMobileLayout();
 // ── Events ─────────────────────────────────
 const menuBtn = document.getElementById('menu-btn');
 menuBtn?.addEventListener('click', () => document.body.classList.toggle('menu-open'));
-// Close mobile menu when any toolbar button is clicked
-document.getElementById('toolbar')?.addEventListener('click', e => {
-  if (e.target.closest('.tb-btn')) document.body.classList.remove('menu-open');
+// Close mobile menu when clicking outside toolbar, bottom bar, or menu button
+document.addEventListener('click', e => {
+  if (!document.body.classList.contains('menu-open')) return;
+  if (e.target.closest('#toolbar') || e.target.closest('#mobile-bottom-bar') || e.target.closest('#menu-btn')) return;
+  document.body.classList.remove('menu-open');
 });
 
 dom.fileInput.addEventListener('change', e => {
@@ -699,8 +737,28 @@ dom.fileInput.addEventListener('change', e => {
 });
 dom.openBtn.addEventListener('click', () => dom.fileInput.click());
 dom.dropZone.addEventListener('click', () => dom.fileInput.click());
-dom.downloadBtn.addEventListener('click', downloadPdf);
-dom.exportPngBtn.addEventListener('click', exportPng);
+// Open PDF split dropdown
+const openArrow = document.getElementById('open-arrow');
+const openDropdown = document.getElementById('open-dropdown');
+openArrow?.addEventListener('click', e => {
+  e.stopPropagation();
+  openDropdown?.classList.toggle('open');
+});
+document.getElementById('dropdown-download')?.addEventListener('click', () => {
+  openDropdown?.classList.remove('open');
+  downloadPdf();
+});
+document.getElementById('dropdown-export')?.addEventListener('click', () => {
+  openDropdown?.classList.remove('open');
+  exportPng();
+});
+document.getElementById('dropdown-close')?.addEventListener('click', () => {
+  openDropdown?.classList.remove('open');
+  closePdf();
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.split-btn')) openDropdown?.classList.remove('open');
+});
 
 dom.viewerWrap.addEventListener('dragover', e => { e.preventDefault(); dom.dropZone?.classList.add('drag-over'); });
 dom.viewerWrap.addEventListener('dragleave', () => dom.dropZone?.classList.remove('drag-over'));
@@ -722,7 +780,6 @@ dom.pageInput.addEventListener('keydown', e => { if (e.key === 'Enter') goToPage
 
 dom.zoomOut.addEventListener('click', () => changeZoom(-0.15));
 dom.zoomIn.addEventListener('click', () => changeZoom(0.15));
-dom.zoomSlider.addEventListener('input', setZoomFromSlider);
 
 dom.rotateBtn.addEventListener('click', rotatePage);
 dom.handBtn.addEventListener('click', toggleHandMode);
@@ -822,7 +879,6 @@ function updateMobileLayout() {
 
   const mobileEls = [
     document.getElementById('zoom-out'),
-    document.getElementById('zoom-slider'),
     document.getElementById('zoom-display'),
     document.getElementById('zoom-in'),
     document.getElementById('rotate-btn'),
@@ -842,7 +898,7 @@ function updateMobileLayout() {
       const pickerRef = document.querySelector('.lang-picker');
       for (const el of mobileEls) {
         if (el.parentNode !== bar) continue;
-        const isZoomGroup = ['zoom-out','zoom-slider','zoom-display','zoom-in','rotate-btn'].includes(el.id);
+        const isZoomGroup = ['zoom-out','zoom-display','zoom-in','rotate-btn'].includes(el.id);
         const ref = isZoomGroup ? zoomRef : pickerRef;
         if (ref && ref.parentNode === toolbar) toolbar.insertBefore(el, ref);
       }
