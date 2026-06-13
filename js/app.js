@@ -719,17 +719,8 @@ function prevResult() {
 dom.iconMoon.style.display = 'block';
 dom.iconSun.style.display = 'none';
 initializeFromStorage().catch(e => console.warn('initializeFromStorage falló:', e));
-updateMobileLayout();
 
 // ── Events ─────────────────────────────────
-const menuBtn = document.getElementById('menu-btn');
-menuBtn?.addEventListener('click', () => document.body.classList.toggle('menu-open'));
-// Close mobile menu when clicking outside toolbar, bottom bar, or menu button
-document.addEventListener('click', e => {
-  if (!document.body.classList.contains('menu-open')) return;
-  if (e.target.closest('#toolbar') || e.target.closest('#mobile-bottom-bar') || e.target.closest('#menu-btn')) return;
-  document.body.classList.remove('menu-open');
-});
 
 dom.fileInput.addEventListener('change', e => {
   const f = e.target.files[0];
@@ -877,35 +868,111 @@ function updateMobileLayout() {
   const toolbar = document.getElementById('toolbar');
   if (!bar || !toolbar) return;
 
-  const mobileEls = [
-    document.getElementById('zoom-out'),
-    document.getElementById('zoom-display'),
-    document.getElementById('zoom-in'),
-    document.getElementById('rotate-btn'),
-    document.getElementById('pdf-theme-wrap'),
-    document.querySelector('.color-picker')
-  ].filter(Boolean);
+  // All elements that move between toolbar and bottom bar sections
+  const movable = [
+    { el: document.querySelector('.split-btn'), section: 0 },
+    { el: document.getElementById('prev-btn'), section: 0 },
+    { el: document.getElementById('page-input'), section: 0 },
+    { el: document.getElementById('page-info'), section: 0 },
+    { el: document.getElementById('next-btn'), section: 0 },
+    { el: document.getElementById('search-wrap'), section: 0 },
+    { el: document.getElementById('zoom-out'), section: 1 },
+    { el: document.getElementById('zoom-display'), section: 1 },
+    { el: document.getElementById('zoom-in'), section: 1 },
+    { el: document.getElementById('rotate-btn'), section: 1 },
+    { el: document.getElementById('pdf-theme-wrap'), section: 1 },
+    { el: document.querySelector('.color-picker'), section: 1 },
+    { el: document.querySelector('.lang-picker'), section: 2 },
+    { el: document.getElementById('page-theme-btn'), section: 2 },
+    { el: document.getElementById('help-btn'), section: 2 },
+  ].filter(x => x.el);
+
+  const sections = bar.querySelectorAll('.bar-section');
 
   if (isMobile) {
-    if (mobileEls.some(el => el.parentNode === toolbar)) {
-      for (const el of mobileEls) {
-        if (el.parentNode === toolbar) bar.appendChild(el);
+    if (toolbar.style.display !== 'none') {
+      toolbar.style.display = 'none';
+      bar.style.display = 'flex';
+
+      for (const { el, section } of movable) {
+        if (el.parentNode === toolbar) sections[section].appendChild(el);
       }
+
+      // Scroll to middle section (index 1)
+      requestAnimationFrame(() => {
+        const wrap = bar.querySelector('.bar-sections');
+        if (wrap) {
+          wrap.scrollLeft = wrap.offsetWidth;
+          updateBarDots();
+        }
+      });
     }
   } else {
-    if (mobileEls.some(el => el.parentNode === bar)) {
-      const zoomRef = document.getElementById('search-wrap');
-      const pickerRef = document.querySelector('.lang-picker');
-      for (const el of mobileEls) {
-        if (el.parentNode !== bar) continue;
-        const isZoomGroup = ['zoom-out','zoom-display','zoom-in','rotate-btn'].includes(el.id);
-        const ref = isZoomGroup ? zoomRef : pickerRef;
-        if (ref && ref.parentNode === toolbar) toolbar.insertBefore(el, ref);
+    if (bar.style.display !== 'none') {
+      toolbar.style.display = '';
+      bar.style.display = 'none';
+
+      // Restore elements to their group positions using reference nodes
+      const fileInput = document.getElementById('file-input');
+
+      const restoreItems = [
+        { get: () => document.querySelector('.split-btn'), group: 0 },
+        { get: () => document.getElementById('prev-btn'), group: 0 },
+        { get: () => document.getElementById('page-input'), group: 0 },
+        { get: () => document.getElementById('page-info'), group: 0 },
+        { get: () => document.getElementById('next-btn'), group: 0 },
+        { get: () => document.getElementById('search-wrap'), group: 0 },
+        { get: () => document.getElementById('zoom-out'), group: 1 },
+        { get: () => document.getElementById('zoom-display'), group: 1 },
+        { get: () => document.getElementById('zoom-in'), group: 1 },
+        { get: () => document.getElementById('rotate-btn'), group: 1 },
+        { get: () => document.getElementById('pdf-theme-wrap'), group: 1 },
+        { get: () => document.querySelector('.color-picker'), group: 1 },
+        { get: () => document.querySelector('.lang-picker'), group: 2 },
+        { get: () => document.getElementById('page-theme-btn'), group: 2 },
+        { get: () => document.getElementById('help-btn'), group: 2 },
+      ];
+
+      for (const item of restoreItems) {
+        const el = item.get();
+        if (!el || el.parentNode !== bar && !el.closest('.bar-section')) continue;
+
+        if (item.group === 0) {
+          // Open + page nav: after file-input
+          if (fileInput?.parentNode === toolbar) {
+            toolbar.insertBefore(el, fileInput.nextSibling);
+          } else {
+            toolbar.prepend(el);
+          }
+        } else if (item.group === 1) {
+          // Zoom group: before lang-picker
+          const ref = document.querySelector('.lang-picker');
+          if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
+          else toolbar.appendChild(el);
+        } else {
+          // Lang/theme/help: before fs-btn
+          const ref = document.getElementById('fs-btn');
+          if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
+          else toolbar.appendChild(el);
+        }
       }
     }
   }
 }
+
+function updateBarDots() {
+  const wrap = document.querySelector('.bar-sections');
+  const dots = document.querySelectorAll('.bar-dot');
+  if (!wrap || !dots.length) return;
+  const idx = Math.round(wrap.scrollLeft / wrap.offsetWidth);
+  dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+}
+
+// Init + events
+updateMobileLayout();
 window.addEventListener('resize', updateMobileLayout);
+const barSections = document.querySelector('.bar-sections');
+barSections?.addEventListener('scroll', updateBarDots, { passive: true });
 
 window.addEventListener('beforeunload', () => {
   try {

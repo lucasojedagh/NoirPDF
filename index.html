@@ -9,10 +9,6 @@
 </head>
 <body>
 
-<button id="menu-btn" data-i18n-title="menu">
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-</button>
-
 <div id="toolbar">
   <span id="app-name">Noir<span>PDF</span></span>
   <div class="sep"></div>
@@ -128,7 +124,24 @@
   </button>
 </div>
 
-<div id="mobile-bottom-bar"></div>
+<div id="mobile-bottom-bar">
+  <div class="bar-sections">
+    <div class="bar-section" data-section="0">
+      <!-- Section 1: Open PDF + page nav -->
+    </div>
+    <div class="bar-section" data-section="1">
+      <!-- Section 2 (default): zoom, rotate, PDF theme, color -->
+    </div>
+    <div class="bar-section" data-section="2">
+      <!-- Section 3: lang, UI theme, help -->
+    </div>
+  </div>
+  <div class="bar-indicators">
+    <span class="bar-dot" data-section="0"></span>
+    <span class="bar-dot active" data-section="1"></span>
+    <span class="bar-dot" data-section="2"></span>
+  </div>
+</div>
 
 <div id="progress-bar"><div id="progress-fill"></div></div>
 
