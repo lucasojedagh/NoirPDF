@@ -2,6 +2,20 @@
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
+// ─────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────
+
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 5.0;
+const BATCH = 10;
+const DROP_SVG = `<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>`;
+const MAX_PIXELS = 5_000_000; // threshold for applyDarkMode optimization
+
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+
 let pdfDoc = null;
 let currentPage = 1;
 let zoom = 1.0;
@@ -10,51 +24,40 @@ let handMode = false;
 let rotation = 0;
 let renderTasks = {};
 let thumbTasks = {};
-let scrollRaf = null;
-let observer = null;
 let customFontColor = '#ebdbb2';
 let cachedFontRgb = { r: 235, g: 219, b: 178 };
 let lang = navigator.language?.startsWith('es') ? 'es' : 'en';
 let i18n = {};
 
-const ZOOM_MIN = 0.25;
-const ZOOM_MAX = 5.0;
-const BATCH = 10;
-
-async function runConcurrent(items, fn, limit = BATCH) {
-  const iterator = items[Symbol.iterator]();
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (const item of iterator) await fn(item);
-  });
-  await Promise.all(workers);
-}
-
-// Search state
+// Search
 let searchResults = [];
 let searchIndex = -1;
 let searchHighlightEls = [];
 let searchId = 0;
 
-// Hand mode state
+// Hand mode
 let handDragging = false;
 let handStartX = 0, handStartY = 0;
 let handScrollX = 0, handScrollY = 0;
 
+// Zoom animation
+let zoomAnimTimer = null;
+
 // FS auto-hide
 let fsHideTimer = null;
 
-const hexToRgb = (() => {
-  const cache = {};
-  return (hex) => {
-    if (cache[hex]) return cache[hex];
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    const result = m ? {
-      r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16)
-    } : { r: 212, g: 212, b: 216 };
-    cache[hex] = result;
-    return result;
-  };
-})();
+// Scroll throttling
+let scrollRaf = null;
+
+// IntersectionObserver for pages
+let observer = null;
+
+// Mobile layout
+let _mobileActive = false;
+
+// ─────────────────────────────────────────────
+// DOM references
+// ─────────────────────────────────────────────
 
 const dom = {
   sidebar:       document.getElementById('sidebar'),
@@ -63,7 +66,6 @@ const dom = {
   pageInput:     document.getElementById('page-input'),
   pageInfo:      document.getElementById('page-info'),
   zoomDisplay:   document.getElementById('zoom-display'),
-
   pdfToggle:     document.getElementById('pdf-theme-toggle'),
   iconSun:       document.getElementById('theme-icon-sun'),
   iconMoon:      document.getElementById('theme-icon-moon'),
@@ -90,17 +92,45 @@ const dom = {
   searchCount:   document.getElementById('search-count'),
   progressFill:  document.getElementById('progress-fill'),
   langBtn:       document.getElementById('lang-btn'),
-  langPopup:     document.getElementById('lang-popup')
+  langPopup:     document.getElementById('lang-popup'),
 };
 
-// IndexedDB para PDF grandes (localStorage solo para settings)
+// ─────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────
+
+const hexToRgb = (() => {
+  const cache = {};
+  return (hex) => {
+    if (cache[hex]) return cache[hex];
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    const result = m
+      ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
+      : { r: 212, g: 212, b: 216 };
+    cache[hex] = result;
+    return result;
+  };
+})();
+
+async function runConcurrent(items, fn, limit = BATCH) {
+  const it = items[Symbol.iterator]();
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (const item of it) await fn(item);
+  });
+  await Promise.all(workers);
+}
+
+// ─────────────────────────────────────────────
+// Storage
+// ─────────────────────────────────────────────
+
 const PdfDB = {
   db: null,
   async init() {
     if (this.db) return;
     this.db = await new Promise((resolve, reject) => {
       const req = indexedDB.open('NoirPDF', 1);
-      req.onupgradeneeded = (e) => { e.target.result.createObjectStore('pdfs', { keyPath: 'id' }); };
+      req.onupgradeneeded = (e) => e.target.result.createObjectStore('pdfs', { keyPath: 'id' });
       req.onsuccess = (e) => resolve(e.target.result);
       req.onerror = (e) => reject(e.target.error);
     });
@@ -140,15 +170,20 @@ const PdfDB = {
 
 const Storage = {
   async savePdf(file) {
-    try { await PdfDB.save(file); return true; } catch (err) {
-      console.warn('Error guardando PDF:', err); return false;
-    }
+    try { await PdfDB.save(file); return true; }
+    catch (err) { console.warn('Error guardando PDF:', err); return false; }
   },
   async loadPdfFromStorage() {
     try { return await PdfDB.load(); } catch { return null; }
   },
-  saveSettings(s) { try { localStorage.setItem('noirpdf-settings', JSON.stringify(s)); } catch (e) { console.warn('saveSettings falló:', e); } },
-  loadSettings() { try { const d = localStorage.getItem('noirpdf-settings'); return d ? JSON.parse(d) : null; } catch { return null; } },
+  saveSettings(s) {
+    try { localStorage.setItem('noirpdf-settings', JSON.stringify(s)); }
+    catch (e) { console.warn('saveSettings falló:', e); }
+  },
+  loadSettings() {
+    try { const d = localStorage.getItem('noirpdf-settings'); return d ? JSON.parse(d) : null; }
+    catch { return null; }
+  },
   clearPdf() { PdfDB.remove().catch(() => {}); }
 };
 
@@ -169,11 +204,14 @@ const autoSave = (() => {
   };
 })();
 
+// ─────────────────────────────────────────────
+// PDF loading
+// ─────────────────────────────────────────────
+
 async function loadPdfFromBlob(blob) {
   const url = URL.createObjectURL(blob);
-  try {
-    pdfDoc = await pdfjsLib.getDocument(url).promise;
-  } finally { URL.revokeObjectURL(url); }
+  try { pdfDoc = await pdfjsLib.getDocument(url).promise; }
+  finally { URL.revokeObjectURL(url); }
   currentPage = 1; zoom = 1.0; rotation = 0;
   updateZoomDisplay();
   dom.pageInput.max = pdfDoc.numPages;
@@ -191,10 +229,11 @@ async function restorePdfFromStorage(blob, settings) {
   settings = settings || {};
   try {
     await loadPdfFromBlob(blob);
-    if (settings.currentPage > 0) setTimeout(() => goToPage(settings.currentPage), 300);
+    // Restore zoom & rotation BEFORE navigating to page
     if (settings.zoom) zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, settings.zoom));
     if (settings.rotation) { rotation = settings.rotation; rerenderAll(); }
     updateZoomDisplay();
+    if (settings.currentPage > 0) setTimeout(() => goToPage(settings.currentPage), 300);
     if (settings.scrollPos) {
       setTimeout(() => { dom.viewerWrap.scrollTop = settings.scrollPos; }, 400);
     }
@@ -225,6 +264,10 @@ async function initializeFromStorage() {
   const pdfBlob = await Storage.loadPdfFromStorage();
   if (pdfBlob) restorePdfFromStorage(pdfBlob, settings);
 }
+
+// ─────────────────────────────────────────────
+// Viewer
+// ─────────────────────────────────────────────
 
 function buildViewer() {
   if (observer) { observer.disconnect(); observer = null; }
@@ -267,9 +310,7 @@ async function renderPage(pageNum) {
 
   const off = document.createElement('canvas');
   off.width = hiRes.width; off.height = hiRes.height;
-  const offCtx = off.getContext('2d');
-
-  const task = page.render({ canvasContext: offCtx, viewport: hiRes });
+  const task = page.render({ canvasContext: off.getContext('2d'), viewport: hiRes });
   renderTasks[pageNum] = task;
 
   try { await task.promise; } catch (e) {
@@ -291,8 +332,11 @@ async function renderPage(pageNum) {
 }
 
 function applyDarkMode(canvas) {
+  const w = canvas.width, h = canvas.height;
+  // Skip if canvas is too large to avoid blocking the main thread
+  if (w * h > MAX_PIXELS) return;
   const ctx = canvas.getContext('2d');
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
   const bgR = 40, bgG = 40, bgB = 40;
   const { r: tcR, g: tcG, b: tcB } = cachedFontRgb;
@@ -306,6 +350,10 @@ function applyDarkMode(canvas) {
   }
   ctx.putImageData(img, 0, 0);
 }
+
+// ─────────────────────────────────────────────
+// Sidebar (thumbnails)
+// ─────────────────────────────────────────────
 
 async function buildSidebar() {
   Object.values(thumbTasks).forEach(t => t.cancel?.());
@@ -343,6 +391,10 @@ async function renderThumb(pageNum) {
   canvas.getContext('2d').drawImage(off, 0, 0);
 }
 
+// ─────────────────────────────────────────────
+// Page navigation
+// ─────────────────────────────────────────────
+
 function goToPage(num) {
   if (!pdfDoc) return;
   num = Math.max(1, Math.min(num, pdfDoc.numPages));
@@ -353,7 +405,42 @@ function goToPage(num) {
 
 function changePage(delta) { goToPage(currentPage + delta); }
 
-let zoomAnimTimer = null;
+function onViewerScroll() {
+  if (scrollRaf) return;
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = null;
+    if (!pdfDoc) return;
+    updateProgress();
+    const wraps = dom.viewerWrap.querySelectorAll('.page-wrap');
+    let best = 1, bestDist = Infinity;
+    const mid = dom.viewerWrap.scrollTop + dom.viewerWrap.clientHeight / 2;
+    for (const w of wraps) {
+      const center = w.offsetTop + w.offsetHeight / 2;
+      const dist = Math.abs(center - mid);
+      if (dist < bestDist) { bestDist = dist; best = parseInt(w.dataset.page); }
+    }
+    if (best !== currentPage) { currentPage = best; dom.pageInput.value = best; updateActiveThumbs(); autoSave(); }
+  });
+}
+
+function updateProgress() {
+  if (!pdfDoc) return;
+  const scrollTop = dom.viewerWrap.scrollTop;
+  const scrollHeight = dom.viewerWrap.scrollHeight - dom.viewerWrap.clientHeight;
+  const pct = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
+  dom.progressFill.style.width = Math.min(pct, 100) + '%';
+}
+
+function updateActiveThumbs() {
+  for (const item of dom.sidebar.querySelectorAll('.thumb-item')) {
+    item.classList.toggle('active', parseInt(item.dataset.page) === currentPage);
+  }
+  dom.sidebar.querySelector('.thumb-item.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// ─────────────────────────────────────────────
+// Zoom
+// ─────────────────────────────────────────────
 
 function changeZoom(delta) {
   if (!pdfDoc) return;
@@ -366,13 +453,10 @@ function changeZoom(delta) {
 function animateZoom(oldZoom) {
   if (zoom / oldZoom === 1) { rerenderAll(); return; }
   if (zoomAnimTimer) { clearTimeout(zoomAnimTimer); zoomAnimTimer = null; }
-
   const wraps = [...dom.viewerWrap.querySelectorAll('.page-wrap')];
   wraps.forEach(w => w.classList.add('zoom-anim'));
   if (wraps.length) void wraps[0].offsetWidth;
-
   rerenderAll();
-
   zoomAnimTimer = setTimeout(() => {
     zoomAnimTimer = null;
     wraps.forEach(w => w.classList.remove('zoom-anim'));
@@ -393,6 +477,10 @@ function rerenderAll() {
   }
   renderPage(currentPage);
 }
+
+// ─────────────────────────────────────────────
+// PDF manipulation
+// ─────────────────────────────────────────────
 
 function rotatePage() {
   if (!pdfDoc) return;
@@ -428,134 +516,10 @@ function togglePageTheme() {
   autoSave();
 }
 
-function applyLanguage() {
-  const t = i18n && i18n[lang];
-  if (!t) return;
-  document.documentElement.lang = lang;
-  for (const el of document.querySelectorAll('[data-i18n]')) {
-    const key = el.dataset.i18n;
-    if (t[key]) el.textContent = t[key];
-  }
-  for (const el of document.querySelectorAll('[data-i18n-title]')) {
-    const key = el.dataset.i18nTitle;
-    if (t[key]) el.title = t[key];
-  }
-  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) {
-    const key = el.dataset.i18nPlaceholder;
-    if (t[key]) el.placeholder = t[key];
-  }
-  dom.langBtn.textContent = t.langLabel;
-  for (const opt of document.querySelectorAll('.lang-opt')) {
-    opt.classList.toggle('active', opt.dataset.lang === lang);
-  }
-}
+// ─────────────────────────────────────────────
+// Download / Export / Close
+// ─────────────────────────────────────────────
 
-function setLang(newLang) {
-  if (!i18n[newLang]) return;
-  lang = newLang;
-  applyLanguage();
-  dom.langPopup.classList.remove('open');
-  autoSave();
-}
-
-function toggleFS() {
-  const entering = !document.body.classList.contains('fs');
-  document.body.classList.toggle('fs');
-  dom.fsBtn.classList.toggle('active');
-  if (entering) {
-    const hint = document.getElementById('fs-hint');
-    hint.classList.add('visible');
-    clearTimeout(hint._timer);
-    hint._timer = setTimeout(() => hint.classList.remove('visible'), 2000);
-  }
-}
-
-// FS auto-hide toolbar
-const toolbarEl = document.getElementById('toolbar');
-dom.viewerWrap.addEventListener('mousemove', () => {
-  if (!document.body.classList.contains('fs')) return;
-  toolbarEl.classList.add('fs-show');
-  clearTimeout(fsHideTimer);
-  fsHideTimer = setTimeout(() => toolbarEl.classList.remove('fs-show'), 2000);
-});
-
-function onViewerScroll() {
-  if (scrollRaf) return;
-  scrollRaf = requestAnimationFrame(() => {
-    scrollRaf = null;
-    if (!pdfDoc) return;
-    updateProgress();
-    const wraps = dom.viewerWrap.querySelectorAll('.page-wrap');
-    let best = 1, bestDist = Infinity;
-    const mid = dom.viewerWrap.scrollTop + dom.viewerWrap.clientHeight / 2;
-    for (const w of wraps) {
-      const center = w.offsetTop + w.offsetHeight / 2;
-      const dist = Math.abs(center - mid);
-      if (dist < bestDist) { bestDist = dist; best = parseInt(w.dataset.page); }
-    }
-    if (best !== currentPage) { currentPage = best; dom.pageInput.value = best; updateActiveThumbs(); autoSave(); }
-  });
-}
-
-function updateProgress() {
-  if (!pdfDoc) return;
-  const scrollTop = dom.viewerWrap.scrollTop;
-  const scrollHeight = dom.viewerWrap.scrollHeight - dom.viewerWrap.clientHeight;
-  const pct = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
-  dom.progressFill.style.width = Math.min(pct, 100) + '%';
-}
-
-function updateActiveThumbs() {
-  for (const item of dom.sidebar.querySelectorAll('.thumb-item')) {
-    item.classList.toggle('active', parseInt(item.dataset.page) === currentPage);
-  }
-  dom.sidebar.querySelector('.thumb-item.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-}
-
-// ── Hand mode ──────────────────────────────
-function toggleHandMode() {
-  handMode = !handMode;
-  document.body.classList.toggle('hand-mode', handMode);
-  dom.handBtn.classList.toggle('active', handMode);
-}
-
-dom.viewerWrap.addEventListener('mousedown', e => {
-  if (!handMode) return;
-  handDragging = true;
-  handStartX = e.clientX;
-  handStartY = e.clientY;
-  handScrollX = dom.viewerWrap.scrollLeft;
-  handScrollY = dom.viewerWrap.scrollTop;
-  e.preventDefault();
-});
-document.addEventListener('mousemove', e => {
-  if (!handDragging) return;
-  const dx = e.clientX - handStartX;
-  const dy = e.clientY - handStartY;
-  dom.viewerWrap.scrollLeft = handScrollX - dx;
-  dom.viewerWrap.scrollTop = handScrollY - dy;
-});
-document.addEventListener('mouseup', () => { handDragging = false; });
-
-dom.viewerWrap.addEventListener('touchstart', e => {
-  if (!handMode || e.touches.length !== 1) return;
-  handDragging = true;
-  handStartX = e.touches[0].clientX;
-  handStartY = e.touches[0].clientY;
-  handScrollX = dom.viewerWrap.scrollLeft;
-  handScrollY = dom.viewerWrap.scrollTop;
-  e.preventDefault();
-}, { passive: false });
-document.addEventListener('touchmove', e => {
-  if (!handDragging || e.touches.length !== 1) return;
-  const dx = e.touches[0].clientX - handStartX;
-  const dy = e.touches[0].clientY - handStartY;
-  dom.viewerWrap.scrollLeft = handScrollX - dx;
-  dom.viewerWrap.scrollTop = handScrollY - dy;
-}, { passive: false });
-document.addEventListener('touchend', () => { handDragging = false; });
-
-// ── Download ───────────────────────────────
 async function downloadPdf() {
   if (!pdfDoc) return;
   const blob = await Storage.loadPdfFromStorage();
@@ -566,7 +530,6 @@ async function downloadPdf() {
   a.click(); URL.revokeObjectURL(url);
 }
 
-// ── Export PNG ─────────────────────────────
 function exportPng() {
   if (!pdfDoc) return;
   const canvas = document.getElementById(`page-canvas-${currentPage}`);
@@ -577,7 +540,6 @@ function exportPng() {
   link.click();
 }
 
-// ── Close PDF ──────────────────────────────
 async function closePdf() {
   if (!pdfDoc) return;
   Object.values(renderTasks).forEach(t => { try { t.cancel(); } catch {} });
@@ -585,11 +547,7 @@ async function closePdf() {
   renderTasks = {}; thumbTasks = {};
   clearHighlights();
   pdfDoc = null; currentPage = 1; zoom = 1.0; rotation = 0;
-  dom.viewerWrap.innerHTML = `<div id="drop-zone">
-    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-    <p data-i18n="dropzone">Click or drag a PDF here</p>
-    <small data-i18n="dropzoneSub">Supports local PDF files</small>
-  </div>`;
+  dom.viewerWrap.innerHTML = `<div id="drop-zone">${DROP_SVG}<p data-i18n="dropzone">Click or drag a PDF here</p><small data-i18n="dropzoneSub">Supports local PDF files</small></div>`;
   dom.sidebar.innerHTML = '';
   dom.pageInput.value = 1; dom.pageInput.max = 1;
   dom.pageInfo.textContent = '/ 0';
@@ -597,23 +555,21 @@ async function closePdf() {
   updateZoomDisplay();
   dom.dropZone = document.getElementById('drop-zone');
   dom.dropZone.addEventListener('click', () => dom.fileInput.click());
+  // Re-attach drag events to the new drop zone
+  dom.viewerWrap.addEventListener('dragover', e => { e.preventDefault(); dom.dropZone?.classList.add('drag-over'); });
+  dom.viewerWrap.addEventListener('dragleave', () => dom.dropZone?.classList.remove('drag-over'));
   Storage.clearPdf();
   autoSave();
 }
 
-// ── Help modal ─────────────────────────────
-function toggleHelp() {
-  dom.helpModal.classList.toggle('open');
-}
+// ─────────────────────────────────────────────
+// Search
+// ─────────────────────────────────────────────
 
-// ── Search ─────────────────────────────────
 function toggleSearch() {
   dom.searchWrap.classList.toggle('active');
-  if (dom.searchWrap.classList.contains('active')) {
-    dom.searchInput.focus();
-  } else {
-    clearHighlights();
-  }
+  if (dom.searchWrap.classList.contains('active')) dom.searchInput.focus();
+  else clearHighlights();
 }
 
 function clearHighlights() {
@@ -648,10 +604,7 @@ async function searchText(query) {
         const charW = item.width / s.length;
         const t = pdfjsLib.Util.transform(vp.transform, item.transform);
         const h = (item.height || 12) * yScale;
-        const x = t[4] + charW * idx;
-        const y = t[5] - h;
-
-        results.push({ pageNum: p, x, y, w: charW * q.length, h });
+        results.push({ pageNum: p, x: t[4] + charW * idx, y: t[5] - h, w: charW * q.length, h });
         idx += q.length;
       }
     }
@@ -664,12 +617,8 @@ async function searchText(query) {
 
   if (id !== searchId) { clearHighlights(); return; }
   searchResults = results;
-  if (results.length === 0) {
-    dom.searchCount.textContent = '0/0';
-    return;
-  }
+  if (results.length === 0) { dom.searchCount.textContent = '0/0'; return; }
 
-  // Create highlight elements
   for (const r of results) {
     if (id !== searchId) { clearHighlights(); return; }
     const wrap = dom.viewerWrap.querySelector(`[data-page="${r.pageNum}"]`);
@@ -695,13 +644,9 @@ function updateSearchCount() {
 function goToSearchResult(idx) {
   if (idx < 0 || idx >= searchResults.length) return;
   searchIndex = idx;
-  // Remove active from all
   for (const el of searchHighlightEls) el.classList.remove('search-active');
-  // Mark active
   if (searchHighlightEls[idx]) searchHighlightEls[idx].classList.add('search-active');
-  // Scroll to page
-  const r = searchResults[idx];
-  goToPage(r.pageNum);
+  goToPage(searchResults[idx].pageNum);
   updateSearchCount();
 }
 
@@ -715,42 +660,182 @@ function prevResult() {
   goToSearchResult((searchIndex - 1 + searchResults.length) % searchResults.length);
 }
 
-// ── Init ───────────────────────────────────
-dom.iconMoon.style.display = 'block';
-dom.iconSun.style.display = 'none';
-initializeFromStorage().catch(e => console.warn('initializeFromStorage falló:', e));
+// ─────────────────────────────────────────────
+// Hand mode
+// ─────────────────────────────────────────────
 
-// ── Events ─────────────────────────────────
+function toggleHandMode() {
+  handMode = !handMode;
+  document.body.classList.toggle('hand-mode', handMode);
+  dom.handBtn.classList.toggle('active', handMode);
+}
 
+// ─────────────────────────────────────────────
+// Fullscreen
+// ─────────────────────────────────────────────
+
+function toggleFS() {
+  const entering = !document.body.classList.contains('fs');
+  document.body.classList.toggle('fs');
+  dom.fsBtn.classList.toggle('active');
+  if (entering) {
+    const hint = document.getElementById('fs-hint');
+    hint.classList.add('visible');
+    clearTimeout(hint._timer);
+    hint._timer = setTimeout(() => hint.classList.remove('visible'), 2000);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Language
+// ─────────────────────────────────────────────
+
+function applyLanguage() {
+  const t = i18n && i18n[lang];
+  if (!t) return;
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    const key = el.dataset.i18n;
+    if (t[key]) el.textContent = t[key];
+  }
+  for (const el of document.querySelectorAll('[data-i18n-title]')) {
+    const key = el.dataset.i18nTitle;
+    if (t[key]) el.title = t[key];
+  }
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) {
+    const key = el.dataset.i18nPlaceholder;
+    if (t[key]) el.placeholder = t[key];
+  }
+  dom.langBtn.textContent = t.langLabel;
+  for (const opt of document.querySelectorAll('.lang-opt')) {
+    opt.classList.toggle('active', opt.dataset.lang === lang);
+  }
+}
+
+function setLang(newLang) {
+  if (!i18n[newLang]) return;
+  lang = newLang;
+  applyLanguage();
+  dom.langPopup.classList.remove('open');
+  autoSave();
+}
+
+// ─────────────────────────────────────────────
+// Help modal
+// ─────────────────────────────────────────────
+
+function toggleHelp() { dom.helpModal.classList.toggle('open'); }
+
+// ─────────────────────────────────────────────
+// Mobile layout
+// ─────────────────────────────────────────────
+
+function updateMobileLayout() {
+  const isMobile = window.innerWidth <= 768;
+  const bar = document.getElementById('mobile-bottom-bar');
+  const toolbar = document.getElementById('toolbar');
+  if (!bar || !toolbar) return;
+  if (isMobile === _mobileActive) return;
+  _mobileActive = isMobile;
+
+  const sections = bar.querySelectorAll('.bar-section');
+  if (!sections.length) return;
+
+  const movable = [
+    { el: document.querySelector('.split-btn'), section: 0 },
+    { el: document.getElementById('prev-btn'), section: 0 },
+    { el: document.getElementById('page-input'), section: 0 },
+    { el: document.getElementById('page-info'), section: 0 },
+    { el: document.getElementById('next-btn'), section: 0 },
+    { el: document.getElementById('search-wrap'), section: 0 },
+    { el: document.getElementById('zoom-out'), section: 1 },
+    { el: document.getElementById('zoom-display'), section: 1 },
+    { el: document.getElementById('zoom-in'), section: 1 },
+    { el: document.getElementById('rotate-btn'), section: 1 },
+    { el: document.getElementById('pdf-theme-wrap'), section: 1 },
+    { el: document.querySelector('.color-picker'), section: 1 },
+    { el: document.querySelector('.lang-picker'), section: 2 },
+    { el: document.getElementById('page-theme-btn'), section: 2 },
+    { el: document.getElementById('help-btn'), section: 2 },
+  ].filter(x => x.el);
+
+  if (isMobile) {
+    for (const { el, section } of movable) {
+      if (el.parentNode === toolbar) sections[section].appendChild(el);
+    }
+    requestAnimationFrame(() => {
+      const wrap = bar.querySelector('.bar-sections');
+      if (wrap) { wrap.scrollLeft = wrap.offsetWidth; updateBarDots(); }
+    });
+  } else {
+    const fileInput = document.getElementById('file-input');
+    const groups = [
+      { get: () => document.querySelector('.split-btn'), group: 0 },
+      { get: () => document.getElementById('prev-btn'), group: 0 },
+      { get: () => document.getElementById('page-input'), group: 0 },
+      { get: () => document.getElementById('page-info'), group: 0 },
+      { get: () => document.getElementById('next-btn'), group: 0 },
+      { get: () => document.getElementById('search-wrap'), group: 0 },
+      { get: () => document.getElementById('zoom-out'), group: 1 },
+      { get: () => document.getElementById('zoom-display'), group: 1 },
+      { get: () => document.getElementById('zoom-in'), group: 1 },
+      { get: () => document.getElementById('rotate-btn'), group: 1 },
+      { get: () => document.getElementById('pdf-theme-wrap'), group: 1 },
+      { get: () => document.querySelector('.color-picker'), group: 1 },
+      { get: () => document.querySelector('.lang-picker'), group: 2 },
+      { get: () => document.getElementById('page-theme-btn'), group: 2 },
+      { get: () => document.getElementById('help-btn'), group: 2 },
+    ];
+
+    for (const { get, group } of groups) {
+      const el = get();
+      if (!el || (el.parentNode !== bar && !el.closest('.bar-section'))) continue;
+      if (group === 0) {
+        if (fileInput?.parentNode === toolbar) toolbar.insertBefore(el, fileInput.nextSibling);
+        else toolbar.prepend(el);
+      } else if (group === 1) {
+        const ref = document.querySelector('.lang-picker');
+        if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
+        else toolbar.appendChild(el);
+      } else {
+        const ref = document.getElementById('fs-btn');
+        if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
+        else toolbar.appendChild(el);
+      }
+    }
+  }
+}
+
+function updateBarDots() {
+  const wrap = document.querySelector('.bar-sections');
+  const dots = document.querySelectorAll('.bar-dot');
+  if (!wrap || !dots.length) return;
+  const idx = Math.round(wrap.scrollLeft / wrap.offsetWidth);
+  dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+}
+
+// ─────────────────────────────────────────────
+// Event bindings
+// ─────────────────────────────────────────────
+
+// ── File operations ──
 dom.fileInput.addEventListener('change', e => {
   const f = e.target.files[0];
   if (f) loadPdf(f).catch(err => console.warn('Error loading PDF:', err));
 });
 dom.openBtn.addEventListener('click', () => dom.fileInput.click());
 dom.dropZone.addEventListener('click', () => dom.fileInput.click());
+
 // Open PDF split dropdown
 const openArrow = document.getElementById('open-arrow');
 const openDropdown = document.getElementById('open-dropdown');
-openArrow?.addEventListener('click', e => {
-  e.stopPropagation();
-  openDropdown?.classList.toggle('open');
-});
-document.getElementById('dropdown-download')?.addEventListener('click', () => {
-  openDropdown?.classList.remove('open');
-  downloadPdf();
-});
-document.getElementById('dropdown-export')?.addEventListener('click', () => {
-  openDropdown?.classList.remove('open');
-  exportPng();
-});
-document.getElementById('dropdown-close')?.addEventListener('click', () => {
-  openDropdown?.classList.remove('open');
-  closePdf();
-});
-document.addEventListener('click', e => {
-  if (!e.target.closest('.split-btn')) openDropdown?.classList.remove('open');
-});
+openArrow?.addEventListener('click', e => { e.stopPropagation(); openDropdown?.classList.toggle('open'); });
+document.getElementById('dropdown-download')?.addEventListener('click', () => { openDropdown?.classList.remove('open'); downloadPdf(); });
+document.getElementById('dropdown-export')?.addEventListener('click', () => { openDropdown?.classList.remove('open'); exportPng(); });
+document.getElementById('dropdown-close')?.addEventListener('click', () => { openDropdown?.classList.remove('open'); closePdf(); });
+document.addEventListener('click', e => { if (!e.target.closest('.split-btn')) openDropdown?.classList.remove('open'); });
 
+// Drag & drop
 dom.viewerWrap.addEventListener('dragover', e => { e.preventDefault(); dom.dropZone?.classList.add('drag-over'); });
 dom.viewerWrap.addEventListener('dragleave', () => dom.dropZone?.classList.remove('drag-over'));
 dom.viewerWrap.addEventListener('drop', e => {
@@ -759,34 +844,28 @@ dom.viewerWrap.addEventListener('drop', e => {
   if (f?.type === 'application/pdf') loadPdf(f);
 });
 
+// ── Sidebar (thumbnails) ──
 dom.sidebar.addEventListener('click', e => {
   const item = e.target.closest('.thumb-item');
   if (item) goToPage(parseInt(item.dataset.page));
 });
 
+// ── Page navigation ──
 dom.prevBtn.addEventListener('click', () => changePage(-1));
 dom.nextBtn.addEventListener('click', () => changePage(1));
 dom.pageInput.addEventListener('change', () => goToPage(parseInt(dom.pageInput.value) || 1));
 dom.pageInput.addEventListener('keydown', e => { if (e.key === 'Enter') goToPage(parseInt(dom.pageInput.value) || 1); });
 
+// ── Zoom ──
 dom.zoomOut.addEventListener('click', () => changeZoom(-0.15));
 dom.zoomIn.addEventListener('click', () => changeZoom(0.15));
 
+// ── View controls ──
 dom.rotateBtn.addEventListener('click', rotatePage);
 dom.handBtn.addEventListener('click', toggleHandMode);
-dom.langBtn.addEventListener('click', e => { e.stopPropagation(); dom.langPopup.classList.toggle('open'); });
-dom.langPopup.addEventListener('click', e => {
-  const opt = e.target.closest('.lang-opt');
-  if (opt) setLang(opt.dataset.lang);
-});
-document.addEventListener('click', e => {
-  if (!e.target.closest('.lang-picker')) dom.langPopup.classList.remove('open');
-});
 dom.fsBtn.addEventListener('click', toggleFS);
-dom.helpBtn.addEventListener('click', toggleHelp);
-dom.helpModal.addEventListener('click', e => { if (e.target === dom.helpModal) dom.helpModal.classList.remove('open'); });
-dom.helpClose.addEventListener('click', () => dom.helpModal.classList.remove('open'));
-dom.viewerWrap.addEventListener('scroll', onViewerScroll, { passive: true });
+
+// ── PDF customization ──
 dom.pdfToggle.addEventListener('click', togglePdfTheme);
 dom.pageThemeBtn.addEventListener('click', togglePageTheme);
 
@@ -796,10 +875,9 @@ dom.colorPopup.addEventListener('click', e => {
   const swat = e.target.closest('.cp-swat');
   if (!swat) return;
   if (swat.dataset.c === 'custom') { dom.fontColor.click(); return; }
-  const color = swat.dataset.c;
-  dom.colorSwatch.style.background = color;
+  dom.colorSwatch.style.background = swat.dataset.c;
   dom.colorPopup.classList.remove('open');
-  changeFontColor(color);
+  changeFontColor(swat.dataset.c);
 });
 dom.fontColor.addEventListener('change', () => {
   const color = dom.fontColor.value;
@@ -807,11 +885,22 @@ dom.fontColor.addEventListener('change', () => {
   dom.colorPopup.classList.remove('open');
   changeFontColor(color);
 });
-document.addEventListener('click', e => {
-  if (!e.target.closest('.color-picker')) dom.colorPopup.classList.remove('open');
-});
+document.addEventListener('click', e => { if (!e.target.closest('.color-picker')) dom.colorPopup.classList.remove('open'); });
 
-// Search events
+// ── Language ──
+dom.langBtn.addEventListener('click', e => { e.stopPropagation(); dom.langPopup.classList.toggle('open'); });
+dom.langPopup.addEventListener('click', e => {
+  const opt = e.target.closest('.lang-opt');
+  if (opt) setLang(opt.dataset.lang);
+});
+document.addEventListener('click', e => { if (!e.target.closest('.lang-picker')) dom.langPopup.classList.remove('open'); });
+
+// ── Help ──
+dom.helpBtn.addEventListener('click', toggleHelp);
+dom.helpModal.addEventListener('click', e => { if (e.target === dom.helpModal) dom.helpModal.classList.remove('open'); });
+dom.helpClose.addEventListener('click', () => dom.helpModal.classList.remove('open'));
+
+// ── Search ──
 dom.searchInput.addEventListener('input', () => searchText(dom.searchInput.value));
 dom.searchPrev.addEventListener('click', prevResult);
 dom.searchNext.addEventListener('click', nextResult);
@@ -820,11 +909,58 @@ dom.searchInput.addEventListener('keydown', e => {
   if (e.key === 'Escape') { toggleSearch(); dom.searchInput.blur(); }
 });
 
-// Keyboard shortcuts
-document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' && e.target !== dom.pageInput) return;
+// ── Viewer scroll ──
+dom.viewerWrap.addEventListener('scroll', onViewerScroll, { passive: true });
 
-  // Navigation
+// ── Hand mode events ──
+dom.viewerWrap.addEventListener('mousedown', e => {
+  if (!handMode) return;
+  handDragging = true;
+  handStartX = e.clientX; handStartY = e.clientY;
+  handScrollX = dom.viewerWrap.scrollLeft; handScrollY = dom.viewerWrap.scrollTop;
+  e.preventDefault();
+});
+document.addEventListener('mousemove', e => {
+  if (!handDragging) return;
+  dom.viewerWrap.scrollLeft = handScrollX - (e.clientX - handStartX);
+  dom.viewerWrap.scrollTop = handScrollY - (e.clientY - handStartY);
+});
+document.addEventListener('mouseup', () => { handDragging = false; });
+
+dom.viewerWrap.addEventListener('touchstart', e => {
+  if (!handMode || e.touches.length !== 1) return;
+  handDragging = true;
+  handStartX = e.touches[0].clientX; handStartY = e.touches[0].clientY;
+  handScrollX = dom.viewerWrap.scrollLeft; handScrollY = dom.viewerWrap.scrollTop;
+  e.preventDefault();
+}, { passive: false });
+document.addEventListener('touchmove', e => {
+  if (!handDragging || e.touches.length !== 1) return;
+  dom.viewerWrap.scrollLeft = handScrollX - (e.touches[0].clientX - handStartX);
+  dom.viewerWrap.scrollTop = handScrollY - (e.touches[0].clientY - handStartY);
+}, { passive: false });
+document.addEventListener('touchend', () => { handDragging = false; });
+
+// ── FS auto-hide toolbar ──
+dom.viewerWrap.addEventListener('mousemove', () => {
+  if (!document.body.classList.contains('fs')) return;
+  const toolbarEl = document.getElementById('toolbar');
+  if (!toolbarEl) return;
+  toolbarEl.classList.add('fs-show');
+  clearTimeout(fsHideTimer);
+  fsHideTimer = setTimeout(() => toolbarEl.classList.remove('fs-show'), 2000);
+});
+
+// ── Ctrl+scroll zoom ──
+dom.viewerWrap.addEventListener('wheel', e => {
+  if (e.ctrlKey) { e.preventDefault(); changeZoom(e.deltaY < 0 ? 0.1 : -0.1); }
+}, { passive: false });
+
+// ── Keyboard shortcuts ──
+document.addEventListener('keydown', e => {
+  const inInput = e.target.tagName === 'INPUT' && e.target !== dom.pageInput;
+  if (inInput && e.key !== 'Escape') return;
+
   if (e.target !== dom.pageInput) {
     switch (e.key) {
       case 'ArrowRight': case 'ArrowDown': changePage(1); return;
@@ -857,109 +993,12 @@ document.addEventListener('keydown', e => {
   }
 });
 
-dom.viewerWrap.addEventListener('wheel', e => {
-  if (e.ctrlKey) { e.preventDefault(); changeZoom(e.deltaY < 0 ? 0.1 : -0.1); }
-}, { passive: false });
-
-// ── Mobile layout ──────────────────────────
-let _mobileActive = false;
-
-function updateMobileLayout() {
-  const isMobile = window.innerWidth <= 768;
-  const bar = document.getElementById('mobile-bottom-bar');
-  const toolbar = document.getElementById('toolbar');
-  if (!bar || !toolbar) return;
-
-  if (isMobile === _mobileActive) return;
-  _mobileActive = isMobile;
-
-  const getMovable = () => [
-    { el: document.querySelector('.split-btn'), section: 0 },
-    { el: document.getElementById('prev-btn'), section: 0 },
-    { el: document.getElementById('page-input'), section: 0 },
-    { el: document.getElementById('page-info'), section: 0 },
-    { el: document.getElementById('next-btn'), section: 0 },
-    { el: document.getElementById('search-wrap'), section: 0 },
-    { el: document.getElementById('zoom-out'), section: 1 },
-    { el: document.getElementById('zoom-display'), section: 1 },
-    { el: document.getElementById('zoom-in'), section: 1 },
-    { el: document.getElementById('rotate-btn'), section: 1 },
-    { el: document.getElementById('pdf-theme-wrap'), section: 1 },
-    { el: document.querySelector('.color-picker'), section: 1 },
-    { el: document.querySelector('.lang-picker'), section: 2 },
-    { el: document.getElementById('page-theme-btn'), section: 2 },
-    { el: document.getElementById('help-btn'), section: 2 },
-  ].filter(x => x.el);
-
-  const sections = bar.querySelectorAll('.bar-section');
-
-  if (isMobile) {
-    // Move elements to bottom bar sections
-    for (const { el, section } of getMovable()) {
-      if (el.parentNode === toolbar) sections[section].appendChild(el);
-    }
-
-    // Scroll to middle section (index 1)
-    requestAnimationFrame(() => {
-      const wrap = bar.querySelector('.bar-sections');
-      if (wrap) { wrap.scrollLeft = wrap.offsetWidth; updateBarDots(); }
-    });
-  } else {
-    // Restore elements to toolbar by group
-    const fileInput = document.getElementById('file-input');
-
-    const restoreItems = [
-      { get: () => document.querySelector('.split-btn'), group: 0 },
-      { get: () => document.getElementById('prev-btn'), group: 0 },
-      { get: () => document.getElementById('page-input'), group: 0 },
-      { get: () => document.getElementById('page-info'), group: 0 },
-      { get: () => document.getElementById('next-btn'), group: 0 },
-      { get: () => document.getElementById('search-wrap'), group: 0 },
-      { get: () => document.getElementById('zoom-out'), group: 1 },
-      { get: () => document.getElementById('zoom-display'), group: 1 },
-      { get: () => document.getElementById('zoom-in'), group: 1 },
-      { get: () => document.getElementById('rotate-btn'), group: 1 },
-      { get: () => document.getElementById('pdf-theme-wrap'), group: 1 },
-      { get: () => document.querySelector('.color-picker'), group: 1 },
-      { get: () => document.querySelector('.lang-picker'), group: 2 },
-      { get: () => document.getElementById('page-theme-btn'), group: 2 },
-      { get: () => document.getElementById('help-btn'), group: 2 },
-    ];
-
-    for (const item of restoreItems) {
-      const el = item.get();
-      if (!el || el.parentNode !== bar && !el.closest('.bar-section')) continue;
-
-      if (item.group === 0) {
-        if (fileInput?.parentNode === toolbar) toolbar.insertBefore(el, fileInput.nextSibling);
-        else toolbar.prepend(el);
-      } else if (item.group === 1) {
-        const ref = document.querySelector('.lang-picker');
-        if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
-        else toolbar.appendChild(el);
-      } else {
-        const ref = document.getElementById('fs-btn');
-        if (ref?.parentNode === toolbar) toolbar.insertBefore(el, ref);
-        else toolbar.appendChild(el);
-      }
-    }
-  }
-}
-
-function updateBarDots() {
-  const wrap = document.querySelector('.bar-sections');
-  const dots = document.querySelectorAll('.bar-dot');
-  if (!wrap || !dots.length) return;
-  const idx = Math.round(wrap.scrollLeft / wrap.offsetWidth);
-  dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-}
-
-// Init + events
+// ── Mobile layout events ──
 updateMobileLayout();
 window.addEventListener('resize', updateMobileLayout);
-const barSections = document.querySelector('.bar-sections');
-barSections?.addEventListener('scroll', updateBarDots, { passive: true });
+document.querySelector('.bar-sections')?.addEventListener('scroll', updateBarDots, { passive: true });
 
+// ── Save on close ──
 window.addEventListener('beforeunload', () => {
   try {
     Storage.saveSettings({
@@ -970,3 +1009,11 @@ window.addEventListener('beforeunload', () => {
     });
   } catch (e) { console.warn('beforeunload save falló:', e); }
 });
+
+// ─────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────
+
+dom.iconMoon.style.display = 'block';
+dom.iconSun.style.display = 'none';
+initializeFromStorage().catch(e => console.warn('initializeFromStorage falló:', e));
