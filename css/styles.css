@@ -37,6 +37,7 @@ body {
   background: var(--bg);
   color: var(--text);
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -677,6 +678,7 @@ body.fs #viewer-wrap {
     background: var(--surface);
     border-top: 1px solid var(--border);
     transition: background var(--transition), border-color var(--transition);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   body.fs #mobile-bottom-bar { display: none; }
 
