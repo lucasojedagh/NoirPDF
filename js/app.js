@@ -55,6 +55,9 @@ let observer = null;
 // Book mode
 let bookMode = false;
 
+// PDF file info (name, size, metadata)
+let fileInfo = null;
+
 // Mobile layout
 let _mobileActive = false;
 
@@ -159,7 +162,7 @@ const PdfDB = {
       req.onsuccess = (e) => resolve(e.target.result);
       req.onerror = (e) => reject(e.target.error);
     });
-    return data?.blob || null;
+    return data || null;
   },
   async remove() {
     await this.init();
@@ -178,7 +181,8 @@ const Storage = {
     catch (err) { console.warn('Error guardando PDF:', err); return false; }
   },
   async loadPdfFromStorage() {
-    try { return await PdfDB.load(); } catch { return null; }
+    try { const d = await PdfDB.load(); return d ? { blob: d.blob, name: d.name, size: d.size } : null; }
+    catch { return null; }
   },
   saveSettings(s) {
     try { localStorage.setItem('noirpdf-settings', JSON.stringify(s)); }
@@ -212,7 +216,7 @@ const autoSave = (() => {
 // PDF loading
 // ─────────────────────────────────────────────
 
-async function loadPdfFromBlob(blob) {
+async function loadPdfFromBlob(blob, info) {
   const url = URL.createObjectURL(blob);
   try { pdfDoc = await pdfjsLib.getDocument(url).promise; }
   finally { URL.revokeObjectURL(url); }
@@ -223,19 +227,21 @@ async function loadPdfFromBlob(blob) {
   dom.pageInput.value = 1;
   buildViewer(); buildSidebar();
   renderPage(1);
+  fileInfo = info ? { name: info.name, size: info.size } : { name: blob.name || 'document.pdf', size: blob.size };
+  pdfDoc.getMetadata().then(meta => { if (fileInfo) fileInfo.metadata = meta.info; }).catch(() => {});
 }
 
 async function loadPdf(file) {
-  await loadPdfFromBlob(file);
+  await loadPdfFromBlob(file, { name: file.name, size: file.size });
   if (await Storage.savePdf(file)) autoSave();
 }
 
-async function restorePdfFromStorage(blob, settings) {
+async function restorePdfFromStorage(data, settings) {
   settings = settings || {};
   bookMode = !!settings.bookMode;
   if (bookMode) dom.bookModeBtn?.classList.add('active');
   try {
-    await loadPdfFromBlob(blob);
+    await loadPdfFromBlob(data.blob, { name: data.name, size: data.size });
     if (settings.zoom) zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, settings.zoom));
     if (settings.rotation) { rotation = settings.rotation; rerenderAll(); }
     updateZoomDisplay();
@@ -303,6 +309,13 @@ function showSpread(pageNum) {
   for (const w of target.querySelectorAll('.page-wrap')) {
     renderPage(parseInt(w.dataset.page));
   }
+  requestAnimationFrame(() => {
+    const overflow = target.scrollWidth > target.clientWidth;
+    target.style.justifyContent = overflow ? 'flex-start' : '';
+    if (overflow && !zoomAnimTimer) {
+      dom.viewerWrap.scrollLeft = Math.max(0, (target.scrollWidth - dom.viewerWrap.clientWidth) / 2);
+    }
+  });
 }
 
 function buildViewer() {
@@ -334,10 +347,10 @@ function buildViewer() {
   dom.viewerWrap.appendChild(fragment);
 
   if (bookMode) {
-    dom.viewerWrap.style.overflow = 'hidden';
+    dom.viewerWrap.style.overflow = 'auto';
     showSpread(currentPage);
   } else {
-    dom.viewerWrap.style.overflow = '';
+    dom.viewerWrap.style.overflow = 'auto';
     observer = new IntersectionObserver(entries => {
       for (const e of entries) {
         if (e.isIntersecting) renderPage(parseInt(e.target.dataset.page));
@@ -422,6 +435,14 @@ async function buildSidebar() {
   runConcurrent(pages, renderThumb);
 }
 
+function renderVisibleThumbs() {
+  const sr = dom.sidebar.getBoundingClientRect();
+  const pages = [...dom.sidebar.querySelectorAll('.thumb-item')]
+    .filter(item => { const r = item.getBoundingClientRect(); return r.bottom > sr.top && r.top < sr.bottom; })
+    .map(item => parseInt(item.dataset.page));
+  if (pages.length) runConcurrent(pages, renderThumb);
+}
+
 async function renderThumb(pageNum) {
   const page = await pdfDoc.getPage(pageNum);
   const base = page.getViewport({ scale: 1 });
@@ -453,6 +474,8 @@ function goToPage(num) {
   updateActiveThumbs(); autoSave();
 
   if (bookMode) {
+    dom.viewerWrap.scrollTop = 0;
+    dom.viewerWrap.scrollLeft = 0;
     showSpread(num);
     return;
   } else {
@@ -528,17 +551,45 @@ function changeZoom(delta) {
 function animateZoom(oldZoom) {
   if (zoom / oldZoom === 1) { rerenderAll(); return; }
   if (zoomAnimTimer) { clearTimeout(zoomAnimTimer); zoomAnimTimer = null; }
+
   const wraps = bookMode
     ? [...dom.viewerWrap.querySelectorAll('.book-spread')]
         .filter(s => s.style.display !== 'none')
         .reduce((a, s) => a.concat([...s.querySelectorAll('.page-wrap')]), [])
     : [...dom.viewerWrap.querySelectorAll('.page-wrap')];
+
+  // Set alignment before re-render so it doesn't change mid-animation
+  if (bookMode) {
+    const spread = dom.viewerWrap.querySelector('.book-spread');
+    if (spread && spread.style.display !== 'none') {
+      const pw = [...spread.querySelectorAll('.page-wrap')];
+      const contentW = pw.reduce((s, w) => s + w.offsetWidth, 0) + (pw.length - 1) * 16;
+      const willOverflow = contentW * (zoom / oldZoom) > spread.clientWidth;
+      spread.style.justifyContent = willOverflow ? 'flex-start' : '';
+      if (willOverflow) {
+        const newW = contentW * (zoom / oldZoom);
+        dom.viewerWrap.scrollTo({
+          left: Math.max(0, (newW - dom.viewerWrap.clientWidth) / 2),
+          top: dom.viewerWrap.scrollTop,
+          behavior: 'smooth'
+        });
+      }
+    }
+  }
+
   wraps.forEach(w => w.classList.add('zoom-anim'));
   if (wraps.length) void wraps[0].offsetWidth;
   rerenderAll();
+
   zoomAnimTimer = setTimeout(() => {
     zoomAnimTimer = null;
     wraps.forEach(w => w.classList.remove('zoom-anim'));
+    if (bookMode) {
+      const spread = dom.viewerWrap.querySelector('.book-spread');
+      if (spread && spread.style.display !== 'none' && spread.scrollWidth > spread.clientWidth) {
+        dom.viewerWrap.scrollLeft = Math.max(0, (spread.scrollWidth - dom.viewerWrap.clientWidth) / 2);
+      }
+    }
   }, 250);
 }
 
@@ -576,8 +627,38 @@ function changeFontColor(color) {
   customFontColor = color; cachedFontRgb = hexToRgb(color);
   autoSave(); if (!pdfDoc) return;
   rerenderAll();
-  const pages = Array.from({ length: pdfDoc.numPages }, (_, i) => i + 1);
-  runConcurrent(pages, renderThumb);
+  renderVisibleThumbs();
+}
+
+function formatFileSize(bytes) {
+  if (bytes == null) return '—';
+  const u = ['B','KB','MB','GB'];
+  let i = 0;
+  while (bytes >= 1024 && i < u.length - 1) { bytes /= 1024; i++; }
+  return (i < 2 ? Math.round(bytes) : bytes.toFixed(1)) + ' ' + u[i];
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  try { return new Date(d).toLocaleString(); } catch { return d; }
+}
+
+function togglePdfInfo() {
+  const modal = document.getElementById('info-modal');
+  if (!modal || !pdfDoc || !fileInfo) return;
+  const open = modal.classList.toggle('open');
+  if (!open) return;
+  document.getElementById('info-filename').textContent = fileInfo.name || '—';
+  document.getElementById('info-filesize').textContent = formatFileSize(fileInfo.size);
+  document.getElementById('info-pages').textContent = pdfDoc.numPages;
+  const m = fileInfo.metadata || {};
+  document.getElementById('info-title').textContent = m.Title || '—';
+  document.getElementById('info-author').textContent = m.Author || '—';
+  document.getElementById('info-subject').textContent = m.Subject || '—';
+  document.getElementById('info-creator').textContent = m.Creator || '—';
+  document.getElementById('info-producer').textContent = m.Producer || '—';
+  document.getElementById('info-created').textContent = formatDate(m.CreationDate);
+  document.getElementById('info-modified').textContent = formatDate(m.ModDate);
 }
 
 function togglePdfTheme() {
@@ -585,8 +666,7 @@ function togglePdfTheme() {
   dom.pdfToggle.classList.toggle('dark-pdf', darkPdf);
   autoSave(); if (!pdfDoc) return;
   rerenderAll();
-  const pages = Array.from({ length: pdfDoc.numPages }, (_, i) => i + 1);
-  runConcurrent(pages, renderThumb);
+  renderVisibleThumbs();
 }
 
 function toggleBookMode() {
@@ -650,11 +730,11 @@ function togglePageTheme() {
 
 async function downloadPdf() {
   if (!pdfDoc) return;
-  const blob = await Storage.loadPdfFromStorage();
-  if (!blob) return;
-  const url = URL.createObjectURL(blob);
+  const data = await Storage.loadPdfFromStorage();
+  if (!data) return;
+  const url = URL.createObjectURL(data.blob);
   const a = document.createElement('a');
-  a.href = url; a.download = blob.name || 'documento.pdf';
+  a.href = url; a.download = data.name || 'documento.pdf';
   a.click(); URL.revokeObjectURL(url);
 }
 
@@ -673,8 +753,8 @@ async function closePdf() {
   Object.values(renderTasks).forEach(t => { try { t.cancel(); } catch {} });
   Object.values(thumbTasks).forEach(t => t.cancel?.());
   renderTasks = {}; thumbTasks = {};
-  clearHighlights();
-  pdfDoc = null; currentPage = 1; zoom = 1.0; rotation = 0; bookMode = false;
+  searchId++; clearHighlights();
+  pdfDoc = null; currentPage = 1; zoom = 1.0; rotation = 0; bookMode = false; fileInfo = null;
   dom.bookModeBtn?.classList.remove('active');
   dom.viewerWrap.style.overflow = '';
   dom.viewerWrap.innerHTML = `<div id="drop-zone">${DROP_SVG}<p data-i18n="dropzone">Click or drag a PDF here</p><small data-i18n="dropzoneSub">Supports local PDF files</small></div>`;
@@ -883,6 +963,7 @@ function updateMobileLayout() {
     { el: document.querySelector('.color-picker'), section: 1 },
     { el: document.querySelector('.lang-picker'), section: 2 },
     { el: document.getElementById('page-theme-btn'), section: 2 },
+    { el: document.getElementById('info-btn'), section: 2 },
     { el: document.getElementById('help-btn'), section: 2 },
   ].filter(x => x.el);
 
@@ -911,6 +992,7 @@ function updateMobileLayout() {
       { get: () => document.querySelector('.color-picker'), group: 1 },
       { get: () => document.querySelector('.lang-picker'), group: 2 },
       { get: () => document.getElementById('page-theme-btn'), group: 2 },
+      { get: () => document.getElementById('info-btn'), group: 2 },
       { get: () => document.getElementById('help-btn'), group: 2 },
     ];
 
@@ -1028,6 +1110,15 @@ dom.helpBtn.addEventListener('click', toggleHelp);
 dom.helpModal.addEventListener('click', e => { if (e.target === dom.helpModal) dom.helpModal.classList.remove('open'); });
 dom.helpClose.addEventListener('click', () => dom.helpModal.classList.remove('open'));
 
+// ── PDF Info ──
+document.getElementById('info-btn')?.addEventListener('click', togglePdfInfo);
+document.getElementById('info-modal')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+document.getElementById('info-close')?.addEventListener('click', () => {
+  document.getElementById('info-modal')?.classList.remove('open');
+});
+
 // ── Search ──
 dom.searchInput.addEventListener('input', () => searchText(dom.searchInput.value));
 dom.searchPrev.addEventListener('click', prevResult);
@@ -1108,6 +1199,7 @@ document.addEventListener('keydown', e => {
     case 'Escape':
       if (document.body.classList.contains('fs')) toggleFS();
       if (dom.helpModal.classList.contains('open')) dom.helpModal.classList.remove('open');
+      document.getElementById('info-modal')?.classList.remove('open');
       break;
   }
 

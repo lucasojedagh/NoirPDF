@@ -1,5 +1,15 @@
 {
   "en": {
+    "pdfInfo": "PDF Info",
+    "fileName": "File",
+    "fileSize": "Size",
+    "title": "Title",
+    "author": "Author",
+    "subject": "Subject",
+    "creator": "Creator",
+    "producer": "Producer",
+    "created": "Created",
+    "modified": "Modified",
     "open": "Open PDF",
     "downloadPdf": "Download PDF",
     "exportPng": "Export page as PNG",
@@ -49,6 +59,16 @@
     "langName": "English"
   },
   "es": {
+    "pdfInfo": "Info del PDF",
+    "fileName": "Archivo",
+    "fileSize": "Tama\u00F1o",
+    "title": "T\u00EDtulo",
+    "author": "Autor",
+    "subject": "Asunto",
+    "creator": "Creador",
+    "producer": "Productor",
+    "created": "Creado",
+    "modified": "Modificado",
     "open": "Abrir PDF",
     "downloadPdf": "Descargar PDF",
     "exportPng": "Exportar p\u00E1gina como PNG",

@@ -121,6 +121,9 @@
     <img id="theme-icon-sun" src="icons/sun2.png" width="20" height="20" alt="" style="display:none">
     <img id="theme-icon-moon" src="icons/moon2.png" width="20" height="20" alt="">
   </button>
+  <button class="tb-btn" id="info-btn" data-i18n-title="pdfInfo">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+  </button>
   <button class="tb-btn" id="help-btn" data-i18n-title="aboutHelp">?</button>
   <button class="tb-btn" id="fs-btn" data-i18n-title="fullscreen">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
@@ -181,6 +184,27 @@
 </aside>
 
 <div id="fs-hint" data-i18n="fsHint">Press ESC to exit reading mode</div>
+
+<aside id="info-modal">
+  <div id="info-content">
+    <h2 data-i18n="pdfInfo">PDF Info</h2>
+    <table>
+      <tr><td data-i18n="fileName">File</td><td id="info-filename"></td></tr>
+      <tr><td data-i18n="fileSize">Size</td><td id="info-filesize"></td></tr>
+      <tr><td data-i18n="pages">Pages</td><td id="info-pages"></td></tr>
+      <tr class="info-sep"><td colspan="2"></td></tr>
+      <tr><td data-i18n="title">Title</td><td id="info-title"></td></tr>
+      <tr><td data-i18n="author">Author</td><td id="info-author"></td></tr>
+      <tr><td data-i18n="subject">Subject</td><td id="info-subject"></td></tr>
+      <tr class="info-sep"><td colspan="2"></td></tr>
+      <tr><td data-i18n="creator">Creator</td><td id="info-creator"></td></tr>
+      <tr><td data-i18n="producer">Producer</td><td id="info-producer"></td></tr>
+      <tr><td data-i18n="created">Created</td><td id="info-created"></td></tr>
+      <tr><td data-i18n="modified">Modified</td><td id="info-modified"></td></tr>
+    </table>
+    <button class="tb-btn" id="info-close" data-i18n="close">Close</button>
+  </div>
+</aside>
 
 <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="js/app.js"></script>

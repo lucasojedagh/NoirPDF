@@ -403,6 +403,64 @@ body.fs #progress-bar { display: none; }
   justify-content: center;
 }
 
+/* ── PDF Info modal ─────────────────────── */
+#info-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+}
+#info-modal.open { display: flex; }
+
+#info-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px 32px;
+  min-width: 360px;
+  max-width: 90vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+#info-content h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+#info-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+#info-content td {
+  padding: 5px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+#info-content td:first-child {
+  white-space: nowrap;
+  padding-right: 20px;
+  color: var(--text);
+  font-weight: 600;
+  width: 1%;
+}
+#info-content td:last-child {
+  word-break: break-word;
+}
+#info-content tr.info-sep td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  height: 1px;
+}
+#info-close {
+  margin-top: 4px;
+  width: 100%;
+  justify-content: center;
+}
+
 /* ── PDF theme ──────────────────────────── */
 #pdf-theme-wrap {
   display: flex;
@@ -585,7 +643,6 @@ body.fs #progress-bar { display: none; }
   overflow-x: auto;
   background: var(--bg);
   display: block;
-  text-align: center;
   position: relative;
   transition: background var(--transition);
 }
