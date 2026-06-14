@@ -52,6 +52,9 @@ let scrollRaf = null;
 // IntersectionObserver for pages
 let observer = null;
 
+// Book mode
+let bookMode = false;
+
 // Mobile layout
 let _mobileActive = false;
 
@@ -91,6 +94,7 @@ const dom = {
   searchNext:    document.getElementById('search-next'),
   searchCount:   document.getElementById('search-count'),
   progressFill:  document.getElementById('progress-fill'),
+  bookModeBtn:   document.getElementById('book-mode-btn'),
   langBtn:       document.getElementById('lang-btn'),
   langPopup:     document.getElementById('lang-popup'),
 };
@@ -196,8 +200,8 @@ const autoSave = (() => {
         Storage.saveSettings({
           theme: document.documentElement.dataset.theme,
           fontColor: customFontColor,
-          darkPdf, currentPage, zoom, rotation, lang,
-          scrollPos: dom.viewerWrap?.scrollTop ?? 0
+          darkPdf, currentPage, zoom, rotation, lang, bookMode,
+          scrollPos: bookMode ? 0 : dom.viewerWrap?.scrollTop ?? 0
         });
       } catch (e) { console.warn('autoSave falló:', e); }
     }, 500);
@@ -218,6 +222,7 @@ async function loadPdfFromBlob(blob) {
   dom.pageInfo.textContent = `/ ${pdfDoc.numPages}`;
   dom.pageInput.value = 1;
   buildViewer(); buildSidebar();
+  renderPage(1);
 }
 
 async function loadPdf(file) {
@@ -227,15 +232,18 @@ async function loadPdf(file) {
 
 async function restorePdfFromStorage(blob, settings) {
   settings = settings || {};
+  bookMode = !!settings.bookMode;
+  if (bookMode) dom.bookModeBtn?.classList.add('active');
   try {
     await loadPdfFromBlob(blob);
-    // Restore zoom & rotation BEFORE navigating to page
     if (settings.zoom) zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, settings.zoom));
     if (settings.rotation) { rotation = settings.rotation; rerenderAll(); }
     updateZoomDisplay();
-    if (settings.currentPage > 0) setTimeout(() => goToPage(settings.currentPage), 300);
-    if (settings.scrollPos) {
-      setTimeout(() => { dom.viewerWrap.scrollTop = settings.scrollPos; }, 400);
+    if (settings.currentPage > 0) {
+      setTimeout(() => {
+        goToPage(settings.currentPage);
+        if (!bookMode && settings.scrollPos) dom.viewerWrap.scrollTop = settings.scrollPos;
+      }, 300);
     }
   } catch (err) {
     console.warn('Error restaurando PDF:', err); Storage.clearPdf();
@@ -269,6 +277,34 @@ async function initializeFromStorage() {
 // Viewer
 // ─────────────────────────────────────────────
 
+function createPageWrap(i) {
+  const wrap = document.createElement('div');
+  wrap.className = 'page-wrap';
+  wrap.dataset.page = i;
+  const canvas = document.createElement('canvas');
+  canvas.className = 'page-canvas';
+  canvas.id = `page-canvas-${i}`;
+  wrap.appendChild(canvas);
+  return wrap;
+}
+
+function showSpread(pageNum) {
+  Object.values(renderTasks).forEach(t => { try { t.cancel(); } catch {} });
+  renderTasks = {};
+  const spreads = dom.viewerWrap.querySelectorAll('.book-spread');
+  let target = null;
+  for (const s of spreads) {
+    const sp = parseInt(s.dataset.page);
+    const match = sp <= pageNum && pageNum <= sp + 1;
+    s.style.display = match ? '' : 'none';
+    if (match) target = s;
+  }
+  if (!target) return;
+  for (const w of target.querySelectorAll('.page-wrap')) {
+    renderPage(parseInt(w.dataset.page));
+  }
+}
+
 function buildViewer() {
   if (observer) { observer.disconnect(); observer = null; }
   dom.viewerWrap.innerHTML = '';
@@ -277,26 +313,38 @@ function buildViewer() {
   renderTasks = {};
 
   const fragment = document.createDocumentFragment();
-  for (let i = 1; i <= pdfDoc.numPages; i++) {
-    const wrap = document.createElement('div');
-    wrap.className = 'page-wrap';
-    wrap.dataset.page = i;
-    const canvas = document.createElement('canvas');
-    canvas.className = 'page-canvas';
-    canvas.id = `page-canvas-${i}`;
-    wrap.appendChild(canvas);
-    fragment.appendChild(wrap);
+
+  if (bookMode) {
+    for (let i = 1; i <= pdfDoc.numPages; i += 2) {
+      const spread = document.createElement('div');
+      spread.className = 'book-spread';
+      spread.appendChild(createPageWrap(i));
+      if (i + 1 <= pdfDoc.numPages) {
+        spread.appendChild(createPageWrap(i + 1));
+      }
+      spread.dataset.page = i;
+      fragment.appendChild(spread);
+    }
+  } else {
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      fragment.appendChild(createPageWrap(i));
+    }
   }
+
   dom.viewerWrap.appendChild(fragment);
 
-  observer = new IntersectionObserver(entries => {
-    for (const e of entries) {
-      if (e.isIntersecting) renderPage(parseInt(e.target.dataset.page));
-    }
-  }, { root: dom.viewerWrap, rootMargin: '200px', threshold: 0 });
-
-  for (const w of dom.viewerWrap.querySelectorAll('.page-wrap')) observer.observe(w);
-  queueMicrotask(() => renderPage(1));
+  if (bookMode) {
+    dom.viewerWrap.style.overflow = 'hidden';
+    showSpread(currentPage);
+  } else {
+    dom.viewerWrap.style.overflow = '';
+    observer = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (e.isIntersecting) renderPage(parseInt(e.target.dataset.page));
+      }
+    }, { root: dom.viewerWrap, rootMargin: '200px', threshold: 0 });
+    for (const w of dom.viewerWrap.querySelectorAll('.page-wrap')) observer.observe(w);
+  }
 }
 
 async function renderPage(pageNum) {
@@ -382,7 +430,10 @@ async function renderThumb(pageNum) {
   off.width = viewport.width; off.height = viewport.height;
   const task = page.render({ canvasContext: off.getContext('2d'), viewport });
   thumbTasks[pageNum] = task;
-  try { await task.promise; } catch (e) { if (e.name !== 'RenderingCancelledException') return; }
+  try { await task.promise; } catch (e) {
+    if (e.name !== 'RenderingCancelledException') console.warn('Render error thumb p' + pageNum, e);
+    return;
+  }
   delete thumbTasks[pageNum];
   if (darkPdf) applyDarkMode(off);
   const canvas = document.getElementById(`thumb-${pageNum}`);
@@ -400,10 +451,27 @@ function goToPage(num) {
   num = Math.max(1, Math.min(num, pdfDoc.numPages));
   currentPage = num; dom.pageInput.value = num;
   updateActiveThumbs(); autoSave();
-  dom.viewerWrap.querySelector(`[data-page="${num}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  if (bookMode) {
+    showSpread(num);
+    return;
+  } else {
+    dom.viewerWrap.querySelector(`[data-page="${num}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
-function changePage(delta) { goToPage(currentPage + delta); }
+function changePage(delta) {
+  if (!pdfDoc) return;
+  if (bookMode) {
+    let spreadStart = currentPage % 2 === 0 ? currentPage - 1 : currentPage;
+    if (spreadStart === 1 && delta < 0) return;
+    let newPage = spreadStart + delta * 2;
+    newPage = Math.max(1, Math.min(newPage, pdfDoc.numPages));
+    goToPage(newPage);
+  } else {
+    goToPage(currentPage + delta);
+  }
+}
 
 function onViewerScroll() {
   if (scrollRaf) return;
@@ -411,6 +479,8 @@ function onViewerScroll() {
     scrollRaf = null;
     if (!pdfDoc) return;
     updateProgress();
+
+    if (bookMode) return;
     const wraps = dom.viewerWrap.querySelectorAll('.page-wrap');
     let best = 1, bestDist = Infinity;
     const mid = dom.viewerWrap.scrollTop + dom.viewerWrap.clientHeight / 2;
@@ -425,10 +495,15 @@ function onViewerScroll() {
 
 function updateProgress() {
   if (!pdfDoc) return;
-  const scrollTop = dom.viewerWrap.scrollTop;
-  const scrollHeight = dom.viewerWrap.scrollHeight - dom.viewerWrap.clientHeight;
-  const pct = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
-  dom.progressFill.style.width = Math.min(pct, 100) + '%';
+  if (bookMode) {
+    const pct = (currentPage / pdfDoc.numPages) * 100;
+    dom.progressFill.style.width = Math.min(pct, 100) + '%';
+  } else {
+    const scrollTop = dom.viewerWrap.scrollTop;
+    const scrollHeight = dom.viewerWrap.scrollHeight - dom.viewerWrap.clientHeight;
+    const pct = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
+    dom.progressFill.style.width = Math.min(pct, 100) + '%';
+  }
 }
 
 function updateActiveThumbs() {
@@ -453,7 +528,11 @@ function changeZoom(delta) {
 function animateZoom(oldZoom) {
   if (zoom / oldZoom === 1) { rerenderAll(); return; }
   if (zoomAnimTimer) { clearTimeout(zoomAnimTimer); zoomAnimTimer = null; }
-  const wraps = [...dom.viewerWrap.querySelectorAll('.page-wrap')];
+  const wraps = bookMode
+    ? [...dom.viewerWrap.querySelectorAll('.book-spread')]
+        .filter(s => s.style.display !== 'none')
+        .reduce((a, s) => a.concat([...s.querySelectorAll('.page-wrap')]), [])
+    : [...dom.viewerWrap.querySelectorAll('.page-wrap')];
   wraps.forEach(w => w.classList.add('zoom-anim'));
   if (wraps.length) void wraps[0].offsetWidth;
   rerenderAll();
@@ -471,11 +550,14 @@ function rerenderAll() {
   clearHighlights();
   Object.values(renderTasks).forEach(t => { try { t.cancel(); } catch {} });
   renderTasks = {};
-  if (!observer) return;
-  for (const w of dom.viewerWrap.querySelectorAll('.page-wrap')) {
-    observer.unobserve(w); observer.observe(w);
+  if (bookMode) {
+    showSpread(currentPage);
+  } else if (observer) {
+    for (const w of dom.viewerWrap.querySelectorAll('.page-wrap')) {
+      observer.unobserve(w); observer.observe(w);
+    }
+    renderPage(currentPage);
   }
-  renderPage(currentPage);
 }
 
 // ─────────────────────────────────────────────
@@ -505,6 +587,52 @@ function togglePdfTheme() {
   rerenderAll();
   const pages = Array.from({ length: pdfDoc.numPages }, (_, i) => i + 1);
   runConcurrent(pages, renderThumb);
+}
+
+function toggleBookMode() {
+  bookMode = !bookMode;
+  dom.bookModeBtn?.classList.toggle('active', bookMode);
+  if (!pdfDoc) return;
+  const prev = currentPage;
+  dom.viewerWrap.scrollTop = 0;
+  dom.viewerWrap.scrollLeft = 0;
+  buildViewer();
+  if (bookMode) {
+    currentPage = prev;
+    dom.pageInput.value = prev;
+    updateActiveThumbs();
+    autoSave();
+  } else {
+    currentPage = prev;
+    dom.pageInput.value = prev;
+    updateActiveThumbs(); autoSave();
+    const target = dom.viewerWrap.querySelector(`[data-page="${prev}"]`);
+    if (target) {
+      if (observer) { observer.disconnect(); observer = null; }
+      dom.viewerWrap.scrollTop = target.offsetTop;
+      renderPage(prev).then(() => {
+        const updated = dom.viewerWrap.querySelector(`[data-page="${prev}"]`);
+        if (updated) {
+          updated.scrollIntoView({ block: 'start' });
+          if (currentPage !== prev) {
+            currentPage = prev;
+            dom.pageInput.value = prev;
+            updateActiveThumbs();
+          }
+        }
+        observer = new IntersectionObserver(entries => {
+          for (const e of entries) {
+            if (e.isIntersecting) renderPage(parseInt(e.target.dataset.page));
+          }
+        }, { root: dom.viewerWrap, rootMargin: '200px', threshold: 0 });
+        for (const w of dom.viewerWrap.querySelectorAll('.page-wrap')) observer.observe(w);
+        requestAnimationFrame(() => {
+          const el = dom.viewerWrap.querySelector(`[data-page="${prev}"]`);
+          if (el) el.scrollIntoView({ block: 'start' });
+        });
+      });
+    }
+  }
 }
 
 function togglePageTheme() {
@@ -546,7 +674,9 @@ async function closePdf() {
   Object.values(thumbTasks).forEach(t => t.cancel?.());
   renderTasks = {}; thumbTasks = {};
   clearHighlights();
-  pdfDoc = null; currentPage = 1; zoom = 1.0; rotation = 0;
+  pdfDoc = null; currentPage = 1; zoom = 1.0; rotation = 0; bookMode = false;
+  dom.bookModeBtn?.classList.remove('active');
+  dom.viewerWrap.style.overflow = '';
   dom.viewerWrap.innerHTML = `<div id="drop-zone">${DROP_SVG}<p data-i18n="dropzone">Click or drag a PDF here</p><small data-i18n="dropzoneSub">Supports local PDF files</small></div>`;
   dom.sidebar.innerHTML = '';
   dom.pageInput.value = 1; dom.pageInput.max = 1;
@@ -555,9 +685,6 @@ async function closePdf() {
   updateZoomDisplay();
   dom.dropZone = document.getElementById('drop-zone');
   dom.dropZone.addEventListener('click', () => dom.fileInput.click());
-  // Re-attach drag events to the new drop zone
-  dom.viewerWrap.addEventListener('dragover', e => { e.preventDefault(); dom.dropZone?.classList.add('drag-over'); });
-  dom.viewerWrap.addEventListener('dragleave', () => dom.dropZone?.classList.remove('drag-over'));
   Storage.clearPdf();
   autoSave();
 }
@@ -862,6 +989,7 @@ dom.zoomIn.addEventListener('click', () => changeZoom(0.15));
 
 // ── View controls ──
 dom.rotateBtn.addEventListener('click', rotatePage);
+dom.bookModeBtn?.addEventListener('click', toggleBookMode);
 dom.handBtn.addEventListener('click', toggleHandMode);
 dom.fsBtn.addEventListener('click', toggleFS);
 
@@ -975,6 +1103,7 @@ document.addEventListener('keydown', e => {
       if (!e.ctrlKey && !e.metaKey) toggleFS();
       break;
     case 'h': case 'H': toggleHandMode(); break;
+    case 'b': case 'B': toggleBookMode(); break;
     case '?': toggleHelp(); break;
     case 'Escape':
       if (document.body.classList.contains('fs')) toggleFS();
@@ -1004,8 +1133,8 @@ window.addEventListener('beforeunload', () => {
     Storage.saveSettings({
       theme: document.documentElement.dataset.theme,
       fontColor: customFontColor,
-      darkPdf, currentPage, zoom, rotation, lang,
-      scrollPos: dom.viewerWrap?.scrollTop ?? 0
+      darkPdf, currentPage, zoom, rotation, lang, bookMode,
+      scrollPos: bookMode ? 0 : dom.viewerWrap?.scrollTop ?? 0
     });
   } catch (e) { console.warn('beforeunload save falló:', e); }
 });

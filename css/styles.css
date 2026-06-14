@@ -615,6 +615,20 @@ body.fs #progress-bar { display: none; }
   border-radius: 8px;
 }
 
+.book-spread {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: 16px;
+  margin: 24px auto;
+  align-items: flex-start;
+}
+.book-spread .page-wrap {
+  margin: 0;
+}
+
+
+
 #drop-zone {
   position: absolute;
   inset: 10%;
