@@ -312,9 +312,6 @@ function showSpread(pageNum) {
   requestAnimationFrame(() => {
     const overflow = target.scrollWidth > target.clientWidth;
     target.style.justifyContent = overflow ? 'flex-start' : '';
-    if (overflow && !zoomAnimTimer) {
-      dom.viewerWrap.scrollLeft = Math.max(0, (target.scrollWidth - dom.viewerWrap.clientWidth) / 2);
-    }
   });
 }
 
@@ -558,25 +555,6 @@ function animateZoom(oldZoom) {
         .reduce((a, s) => a.concat([...s.querySelectorAll('.page-wrap')]), [])
     : [...dom.viewerWrap.querySelectorAll('.page-wrap')];
 
-  // Set alignment before re-render so it doesn't change mid-animation
-  if (bookMode) {
-    const spread = dom.viewerWrap.querySelector('.book-spread');
-    if (spread && spread.style.display !== 'none') {
-      const pw = [...spread.querySelectorAll('.page-wrap')];
-      const contentW = pw.reduce((s, w) => s + w.offsetWidth, 0) + (pw.length - 1) * 16;
-      const willOverflow = contentW * (zoom / oldZoom) > spread.clientWidth;
-      spread.style.justifyContent = willOverflow ? 'flex-start' : '';
-      if (willOverflow) {
-        const newW = contentW * (zoom / oldZoom);
-        dom.viewerWrap.scrollTo({
-          left: Math.max(0, (newW - dom.viewerWrap.clientWidth) / 2),
-          top: dom.viewerWrap.scrollTop,
-          behavior: 'smooth'
-        });
-      }
-    }
-  }
-
   wraps.forEach(w => w.classList.add('zoom-anim'));
   if (wraps.length) void wraps[0].offsetWidth;
   rerenderAll();
@@ -584,12 +562,6 @@ function animateZoom(oldZoom) {
   zoomAnimTimer = setTimeout(() => {
     zoomAnimTimer = null;
     wraps.forEach(w => w.classList.remove('zoom-anim'));
-    if (bookMode) {
-      const spread = dom.viewerWrap.querySelector('.book-spread');
-      if (spread && spread.style.display !== 'none' && spread.scrollWidth > spread.clientWidth) {
-        dom.viewerWrap.scrollLeft = Math.max(0, (spread.scrollWidth - dom.viewerWrap.clientWidth) / 2);
-      }
-    }
   }, 250);
 }
 
