@@ -10,9 +10,8 @@
 <body>
 
 <div id="toolbar">
+  <!-- ══ Group 1: File ══ -->
   <span id="app-name">Noir<span>PDF</span></span>
-  <div class="sep"></div>
-
   <div class="split-btn">
     <button class="tb-btn" id="open-btn">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -37,12 +36,10 @@
       </button>
     </div>
   </div>
-  <input type="file" id="file-input" accept=".pdf">
-
-  <div class="flex-break"></div>
 
   <div class="sep"></div>
 
+  <!-- ══ Group 2: Navigation & Search ══ -->
   <button class="tb-btn" id="prev-btn" data-i18n-title="prevPage">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
   </button>
@@ -51,11 +48,20 @@
   <button class="tb-btn" id="next-btn" data-i18n-title="nextPage">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
   </button>
-
-  <div class="flex-break"></div>
+  <button class="tb-btn" id="bookmark-btn" data-i18n-title="bookmark">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+  </button>
+  <div id="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="text" id="search-input" data-i18n-placeholder="search">
+    <button class="tb-btn" id="search-prev" data-i18n-title="searchPrev">▲</button>
+    <span id="search-count"></span>
+    <button class="tb-btn" id="search-next" data-i18n-title="searchNext">▼</button>
+  </div>
 
   <div class="sep"></div>
 
+  <!-- ══ Group 3: View Controls ══ -->
   <button class="tb-btn" id="zoom-out" data-i18n-title="zoomOut">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
   </button>
@@ -69,28 +75,20 @@
   <button class="tb-btn" id="book-mode-btn" data-i18n-title="bookMode">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h20v18H2z"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
   </button>
-
-  <div id="search-wrap">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input type="text" id="search-input" data-i18n-placeholder="search">
-    <button class="tb-btn" id="search-prev" data-i18n-title="searchPrev">▲</button>
-    <span id="search-count"></span>
-    <button class="tb-btn" id="search-next" data-i18n-title="searchNext">▼</button>
-  </div>
-
   <button class="tb-btn" id="hand-btn" data-i18n-title="handMode">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 11V6a2 2 0 0 0-4 0v1M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 0 1 4 0v6a8 8 0 0 1-8 8h-2c-2.21 0-4.21-.9-5.66-2.34L3.5 14.5a1.5 1.5 0 1 1 2.12-2.12L7 13.5V6a2 2 0 0 1 4 0v4"/></svg>
   </button>
 
   <div class="sep"></div>
 
+  <div class="spacer"></div>
+
+  <!-- ══ Group 4: PDF Appearance ══ -->
   <div id="pdf-theme-wrap">
     <img src="icons/sun.png" width="14" height="14" alt="">
     <div id="pdf-theme-toggle" data-i18n-title="pdfTheme"></div>
     <img src="icons/moon.png" width="14" height="14" alt="">
   </div>
-
-  <div class="spacer"></div>
 
   <div class="color-picker" data-i18n-title="textColor">
     <button id="color-swatch" style="background:#ebdbb2"></button>
@@ -109,7 +107,22 @@
     </div>
   </div>
 
-  <div class="flex-break"></div>
+  <div id="pdf-adjust">
+    <button class="tb-btn" id="adjust-btn" data-i18n-title="adjust">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+    </button>
+    <div id="adjust-popup">
+      <label data-i18n="brightness">Brightness</label>
+      <input type="range" id="brightness-slider" min="30" max="200" value="100">
+      <label data-i18n="contrast">Contrast</label>
+      <input type="range" id="contrast-slider" min="30" max="200" value="100">
+      <button class="tb-btn" id="adjust-reset" data-i18n="default">Default</button>
+    </div>
+  </div>
+
+  <div class="sep"></div>
+
+  <!-- ══ Group 5: App ══ -->
   <div class="lang-picker">
     <button class="tb-btn" id="lang-btn" data-i18n-title="langSwitch">EN</button>
     <div id="lang-popup">
@@ -131,9 +144,38 @@
 </div>
 
 <div id="progress-bar"><div id="progress-fill"></div></div>
+<div id="loading-bar"><div id="loading-fill"></div></div>
 
 <div id="main">
-  <div id="sidebar"></div>
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <div id="sidebar-tabs">
+        <button class="stab active" data-tab="all">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <span data-i18n="allPages">All</span>
+        </button>
+        <button class="stab" data-tab="bookmarks">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          <span data-i18n="bookmarksTab">Bookmarks</span>
+        </button>
+      </div>
+      <button id="sidebar-toggle" data-i18n-title="toggleSidebar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+    </div>
+    <div id="sidebar-body"></div>
+    <div id="sidebar-bar">
+      <button class="sicon active" data-tab="all" data-i18n-title="allPages">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      </button>
+      <button class="sicon" data-tab="bookmarks" data-i18n-title="bookmarksTab">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button id="sidebar-expand" data-i18n-title="expandSidebar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  </div>
   <div id="viewer-wrap">
     <div id="drop-zone">
       <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
@@ -144,21 +186,7 @@
 </div>
 
 <div id="mobile-bottom-bar">
-  <div class="bar-sections">
-    <div class="bar-section" data-section="0">
-      <!-- Section 1: Open PDF + page nav -->
-    </div>
-    <div class="bar-section" data-section="1">
-      <!-- Section 2 (default): zoom, rotate, PDF theme, color -->
-    </div>
-    <div class="bar-section" data-section="2">
-      <!-- Section 3: lang, UI theme, help -->
-    </div>
-  </div>
-  <div class="bar-indicators">
-    <span class="bar-dot" data-section="0"></span>
-    <span class="bar-dot active" data-section="1"></span>
-    <span class="bar-dot" data-section="2"></span>
+  <div class="bar-items">
   </div>
 </div>
 
@@ -174,6 +202,7 @@
       <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td data-i18n="helpSearch">Search text</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>R</kbd></td><td data-i18n="helpRotate">Rotate page</td></tr>
       <tr><td><kbd>H</kbd></td><td data-i18n="helpHand">Hand mode</td></tr>
+      <tr><td><kbd>M</kbd></td><td data-i18n="helpBookmark">Bookmark page</td></tr>
       <tr><td><kbd>F</kbd></td><td data-i18n="helpFS">Fullscreen</td></tr>
       <tr><td><kbd>Esc</kbd></td><td data-i18n="helpClose">Close modals</td></tr>
       <tr><td><kbd>?</kbd></td><td data-i18n="aboutHelp">About</td></tr>
@@ -183,7 +212,7 @@
   </div>
 </aside>
 
-<div id="fs-hint" data-i18n="fsHint">Press ESC to exit reading mode</div>
+<div id="fs-hint" data-i18n="fsHint">Press ESC or F to exit reading mode</div>
 
 <aside id="info-modal">
   <div id="info-content">
@@ -204,9 +233,11 @@
     </table>
     <button class="tb-btn" id="info-close" data-i18n="close">Close</button>
   </div>
-</aside>
+  </aside>
 
-<script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-<script src="js/app.js"></script>
+  <input type="file" id="file-input" accept=".pdf">
+
+  <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
